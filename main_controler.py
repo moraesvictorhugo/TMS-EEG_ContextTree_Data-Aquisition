@@ -9,9 +9,9 @@ import magicpy as mp
 import pandas as pd
 import pyautogui
 import serial
-from Components.update_navigation import UpdateNavigationInfo
-from Components import constants as consts
-from modules.dataAcquisition_functions import zero_decision, sequence_generator, send_trigger_to_esp32
+from components.update_navigation import UpdateNavigationInfo
+from components import constants as consts
+from components.functions import zero_decision, sequence_generator, send_trigger_to_esp32
 
 ####
 # EXPERIMENT SETTINGS

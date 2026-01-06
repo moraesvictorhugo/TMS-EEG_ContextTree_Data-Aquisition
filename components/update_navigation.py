@@ -1,7 +1,7 @@
 import time
 import threading
-from Components.remote_control import RemoteControl
-from Components import constants as consts
+from components.remote_control import RemoteControl
+from components import constants as consts
 
 class UpdateNavigationInfo:
 

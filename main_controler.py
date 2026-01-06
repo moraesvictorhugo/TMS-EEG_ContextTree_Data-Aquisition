@@ -7,7 +7,8 @@ from collections import deque
 import keyboard
 import magicpy as mp
 import pandas as pd
-import pyautogui
+import numpy as np
+# import pyautogui
 import serial
 from components.update_navigation import UpdateNavigationInfo
 from components import constants as consts
@@ -17,6 +18,8 @@ from components.functions import zero_decision, sequence_generator, send_trigger
 # EXPERIMENT SETTINGS
 ####
 mode = "intensity"  # protocol
+export_sequence_txt = False
+volunteer_code = "V00"
 
 # history of last 10 target_status values
 target_status_history = deque([False] * 10, maxlen=10)
@@ -40,33 +43,34 @@ intensities = {
 # -----------------------------
 # SEQUENCE GENERATION
 # -----------------------------
-values = [0, 1, 2]
-sequence = [random.choice(values)]
-number_of_stimuli = 400  # ajuste se quiser outro número
+alphabet = [0, 1, 2]
+sequence = [random.choice(alphabet)]
+number_of_stimuli = 400  # total trials
 
-# inicialização idêntica ao script original
+# Inicialização da sequência
 if sequence[0] == 0:
-    zero_decision()
+    zero_decision(sequence)
 elif sequence[0] == 1:
     sequence.append(1)
 elif sequence[0] == 2:
     sequence.append(1)
 
 for _ in range(number_of_stimuli - 2):
-    sequence_generator()
+    sequence_generator(sequence)
 
 print("Sequência gerada:", sequence)
 
-# opcional: checar distribuição
+# Checar distribuição e exportar
 contagem = pd.Series(sequence).value_counts().sort_index()
-print("Contagem por tipo:", contagem)
-# se quiser ainda salvar:
-# np.savetxt(
-#     'tree_sequence_' + str(number_of_stimuli) + '_LMS.txt',
-#     sequence,
-#     delimiter=',',
-#     fmt='%d'
-# )
+print("Contagem por tipo:\n", contagem)
+
+if export_sequence_txt:
+    np.savetxt(
+        'tree_sequence_' + str(number_of_stimuli) + '_trials_'+ volunteer_code + '.txt',
+        sequence,
+        delimiter=',',
+        fmt='%d'
+    )
 
 '''
 CONNECTION TO NAVIGATION UPDATES

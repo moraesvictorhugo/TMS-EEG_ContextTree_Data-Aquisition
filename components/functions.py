@@ -1,4 +1,6 @@
-def zero_decision():
+import random
+
+def zero_decision(sequence):
     """
     Generate the next element in the sequence based on a probabilistic decision.
 
@@ -18,7 +20,7 @@ def zero_decision():
     else:                # 70% chance de ser 2
         sequence.append(2)
 
-def sequence_generator():
+def sequence_generator(sequence):
     """
     This function generates the next element in the sequence based on the last two elements.
     
@@ -44,7 +46,7 @@ def sequence_generator():
     if sequence_past[-1] == 2:
         sequence.append(1)
     elif sequence_past[-1] == 0:
-        zero_decision()
+        zero_decision(sequence)
     elif sequence_past[-2] == 0 and sequence_past[-1] == 1:
         sequence.append(1)
     elif sequence_past[-2] == 1 and sequence_past[-1] == 1:

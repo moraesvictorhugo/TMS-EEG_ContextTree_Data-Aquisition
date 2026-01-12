@@ -143,7 +143,7 @@ while True:
             stimulator.set_mode(
                 mode='Standard',
                 current_dir='Normal',
-                n_pulses_per_burst=2,           # Possivelmente vai disparar pareado!
+                n_pulses_per_burst=2,           
                 ipi=10,
                 baratio=80,
             )
@@ -174,7 +174,7 @@ while True:
             print("disparando")
             time.sleep(random.uniform(consts.ITI[0], consts.ITI[1]))
 
-            print("Index do pulso", pulse_index + 1)
+            print("Index do pulso:", pulse_index + 1)
             pulse_index += 1  # Só incrementa se tudo deu certo
 
         except Exception as e:

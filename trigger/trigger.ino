@@ -15,7 +15,7 @@ const int BIT2_PIN = 33; // IN3
 const int BIT3_PIN = 32; // IN4
 
 // Pulso em milissegundos
-const unsigned long PULSE_DURATION_MS = 30;
+const unsigned long PULSE_DURATION_MS = 100;
 
 void setup() {
   // Configura pinos como saída

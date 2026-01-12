@@ -1,2 +1,74 @@
-.venv/
+# ========================
+# Python
+# ========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+*.py[cod]
+*$py.class
+
+# ========================
+# Virtual environments
+# ========================
 venv/
+env/
+ENV/
+.venv/
+
+# ========================
+# Distribution / packaging
+# ========================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ========================
+# PyInstaller
+# ========================
+*.manifest
+*.spec
+
+# ========================
+# Unit test / coverage
+# ========================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+
+# ========================
+# Jupyter Notebook
+# ========================
+.ipynb_checkpoints
+
+# ========================
+# IDEs / Editors
+# ========================
+.vscode/
+.idea/
+.spyderproject
+.spyderworkspace
+
+# ========================
+# OS files
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Mypy / type checking
+# ========================
+.mypy_cache/
+.dmypy.json
+dmypy.jso

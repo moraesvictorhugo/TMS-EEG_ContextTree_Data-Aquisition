@@ -2,7 +2,7 @@ import serial
 import time
 
 # ================= CONFIGURAÇÃO =================
-PORTA_SERIAL = 'COM6'
+PORTA_SERIAL = 'COM3'
 BAUD_RATE = 115200
 DELAY_BETWEEN_TRIGGERS = 3  # segundos
 

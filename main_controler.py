@@ -8,7 +8,7 @@ import keyboard
 import magicpy as mp
 import pandas as pd
 import numpy as np
-# import pyautogui
+import pyautogui
 import serial
 from components.update_navigation import UpdateNavigationInfo
 from components import constants as consts
@@ -27,7 +27,7 @@ target_status_history = deque([False] * 10, maxlen=10)
 ####
 # Volunteer's parameters
 ####
-rmt_intensity = 36  # Resting motor threshold of the subject
+rmt_intensity = 10  # Resting motor threshold of the subject
 
 # For intensity mode:
 intensity_0 = int(0.8 * rmt_intensity)
@@ -93,7 +93,7 @@ stimulator.set_page('Main', get_response=False)
 '''
 CONNECTION WITH ARDUINO / ESP32
 '''
-PORTA_SERIAL = 'COM6'      # ajuste se necessário
+PORTA_SERIAL = 'COM3'      # ajuste se necessário
 BAUD_RATE = 115200
 ser = serial.Serial(PORTA_SERIAL, BAUD_RATE, timeout=1)
 time.sleep(2)  # aguarda ESP32 reiniciar
@@ -143,8 +143,8 @@ while True:
             stimulator.set_mode(
                 mode='Standard',
                 current_dir='Normal',
-                n_pulses_per_burst=2,
-                ipi=5,
+                n_pulses_per_burst=2,           # Possivelmente vai disparar pareado!
+                ipi=10,
                 baratio=80,
             )
             time.sleep(1)
@@ -165,7 +165,7 @@ while True:
 
                 # 2) dispara trigger para ESP32 (0->1, 1->2, 2->3)
                 trigger_value = estimulo + 1
-                send_trigger_to_esp32(trigger_value)
+                send_trigger_to_esp32(ser, trigger_value)
 
                 # 3) opcional: trigger para navegação
                 if consts.create_navigation_marker:

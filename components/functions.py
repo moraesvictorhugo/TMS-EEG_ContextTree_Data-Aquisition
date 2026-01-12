@@ -56,6 +56,7 @@ def sequence_generator(sequence):
     else:
         print("bug")
 
+'''
 def send_trigger_to_esp32(trigger: int):
     """
     Envia um trigger para o ESP32.
@@ -78,3 +79,20 @@ def send_trigger_to_esp32(trigger: int):
         ser.write(f"{trigger}\n".encode("ascii"))
     except Exception as e:
         print(f"Erro ao enviar trigger {trigger} para ESP32: {e}")
+'''
+
+'''def send_trigger_to_esp32(ser, trigger: int):
+    ser.write(f"{trigger}\n".encode("ascii"))
+'''
+def send_trigger_to_esp32(ser, trigger_value):
+    """
+    Envia trigger para ESP32 via serial.
+    trigger_value deve estar entre 1 e 15.
+    """
+    if 1 <= trigger_value <= 15:
+        # envia trigger + newline para o ESP32 ler corretamente
+        ser.write(f"{trigger_value}\n".encode("ascii"))
+        ser.flush()  # garante que os bytes vão imediatamente
+        print(f"Trigger enviado: {trigger_value}")
+    else:
+        print(f"Trigger inválido (não enviado): {trigger_value}")

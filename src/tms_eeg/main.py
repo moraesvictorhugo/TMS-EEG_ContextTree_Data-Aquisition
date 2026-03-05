@@ -93,9 +93,6 @@ def run_experiment(sequence, tracker, stimulator, trigger):
                 # trigger for EEG: 0→1, 1→2, 2→3
                 trigger.send(stimulus + 1)
 
-                if config.CREATE_NAVIGATION_MARKER:
-                    tracker.send_trigger_to_navigation()
-
             print("disparando")
             time.sleep(random.uniform(*config.ITI))
 

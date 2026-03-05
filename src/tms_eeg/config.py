@@ -33,7 +33,7 @@ ITI = (1, 3)                  # inter-trial interval range in seconds
                               # MagicPy already adds ~3 s due to sleep calls
 
 # ─── Target tracking ─────────────────────────────────────────────────
-TARGET_HISTORY_SIZE = 10      # how many consecutive True statuses are needed
+TARGET_HISTORY_SIZE = 50      # how many consecutive True statuses are needed
                               # before firing a pulse
 
 # ─── Neuronavigation (InVesalius relay server) ────────────────────────

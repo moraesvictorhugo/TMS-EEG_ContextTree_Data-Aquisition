@@ -9,10 +9,7 @@ This script orchestrates the full experiment:
 import random
 import time
 from collections import deque
-
 import keyboard
-import pyautogui
-
 from tms_eeg import config
 from tms_eeg.sequence import generate_sequence, print_sequence_stats, export_sequence
 from tms_eeg.hardware.stimulator import StimulatorController
@@ -59,8 +56,6 @@ def run_experiment(sequence, tracker, stimulator, trigger):
     )
 
     pulse_index = 0
-    pyautogui.PAUSE = 0
-    pyautogui.FAILSAFE = False
     paused = False
 
     while True:

@@ -55,10 +55,14 @@ class NavigationTracker:
             for i, rc in enumerate(self.rc):
                 if rc is None:
                     continue
-                self.target_status[i], self.marker_label[i] = (
-                    self._process_buffer(rc, self.target_status[i], self.marker_label[i])
+                new_target, new_marker = self._process_buffer(
+                    rc, self.target_status[i], self.marker_label[i]
                 )
-            self.all_target_status = all(self.target_status)
+                with self.status_lock:
+                    self.target_status[i] = new_target
+                    self.marker_label[i] = new_marker
+            with self.status_lock:
+                self.all_target_status = all(self.target_status)
 
     def _process_buffer(self, rc, target, marker):
         """Parse buffered messages and return updated target/marker state.

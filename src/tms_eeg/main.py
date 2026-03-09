@@ -62,17 +62,17 @@ def run_experiment(sequence, tracker, stimulator, trigger):
         # ── pause / resume ────────────────────────────────────────────
         if keyboard.is_pressed("b"):
             paused = True
-            print("Sequência pausada (tecla B).")
+            print("Paused sequence (key B).")
         if keyboard.is_pressed("g") and paused:
             paused = False
-            print("Sequência retomada (tecla G).")
+            print("Sequence resumed (key G).")
 
         if paused:
             time.sleep(0.05)
             continue
 
         # ── target tracking gate ──────────────────────────────────────
-        current_status = tracker.target_status
+        current_status = tracker.all_target_status
         target_history.append(current_status)
 
         if not all(target_history):
@@ -83,30 +83,35 @@ def run_experiment(sequence, tracker, stimulator, trigger):
         try:
             stimulus = sequence[pulse_index]
             intensity = config.INTENSITY_MAP[stimulus]
-            print(f"Intensidade: {intensity} (tipo {stimulus})")
+            print(f"Intensity: {intensity} (event {stimulus})")
 
             stimulator.prepare_pulse(intensity)
 
             with tracker.status_lock:
-                stimulator.fire()
+                if not tracker.all_target_status:
+                    print("⚠️ Coil out of target. Restarting gate...")
+                    target_history.clear()
+                    target_history.extend([False] * config.TARGET_HISTORY_SIZE)
+                    continue
 
+                stimulator.fire()
                 # trigger for EEG: 0→1, 1→2, 2→3
                 trigger.send(stimulus + 1)
 
-            print("disparando")
+            print("Firing")
             time.sleep(random.uniform(*config.ITI))
 
-            print(f"Index do pulso: {pulse_index + 1}")
+            print(f"Pulse index: {pulse_index + 1}")
             pulse_index += 1
 
         except Exception as e:
-            print(f"\n⚠️ ERRO no pulso {pulse_index}: {e}")
-            print("Tentando novamente o mesmo pulso...\n")
+            print(f"\n⚠️ ERRO in pulse {pulse_index}: {e}")
+            print("Trying again the same pulse...\n")
             time.sleep(2)
 
         # ── end condition ─────────────────────────────────────────────
         if pulse_index >= len(sequence):
-            print("Encerrando sequência (fim da sequência de pulsos).")
+            print("Ending sequence (end of pulse sequence).")
             break
 
         time.sleep(0.01)
@@ -142,7 +147,7 @@ def main():
     )
 
     # 5. Wait for operator
-    wait_for_key("s", "Aperte a tecla s para iniciar os pulsos...")
+    wait_for_key("s", "Press the 's' key to start the pulses....")
     print("start sequence")
 
     # 6. Run experiment

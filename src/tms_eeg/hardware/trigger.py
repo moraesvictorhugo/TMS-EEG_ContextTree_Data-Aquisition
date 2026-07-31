@@ -23,14 +23,10 @@ class TriggerSender:
     """
 
     def __init__(self, port, baud_rate=115200, startup_delay=2):
-        self._ser = serial.Serial()
-        self._ser.port = port
-        self._ser.baudrate = baud_rate
-        self._ser.timeout = 1
+        self._ser = serial.Serial(port, baud_rate, timeout=1)
         # Explicitly disable DTR and RTS to prevent auto-resetting the ESP32
         self._ser.setDTR(False)
         self._ser.setRTS(False)
-        self._ser.open()
         time.sleep(startup_delay)  # wait for ESP32 to reboot, if it still does
 
     def send(self, trigger_value):

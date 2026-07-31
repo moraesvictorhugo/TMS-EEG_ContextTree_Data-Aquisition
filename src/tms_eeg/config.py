@@ -40,7 +40,6 @@ TARGET_HISTORY_SIZE = 50      # how many consecutive True statuses are needed
 NAVIGATION_ADDRESS = "127.0.0.1"
 NAVIGATION_PORTS = [5000]
 CREATE_NAVIGATION_MARKER = False
-NUMBER_OF_RC = 1              # number of remote-control connections
 
 # Publisher message topics expected from InVesalius
 PUB_MESSAGES = [

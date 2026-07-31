@@ -132,7 +132,7 @@ def main():
         )
 
     # 2. Connect neuronavigation
-    tracker = NavigationTracker(config.NUMBER_OF_RC)
+    tracker = NavigationTracker()
     tracker.connect(config.NAVIGATION_ADDRESS, config.NAVIGATION_PORTS)
 
     # 3. Connect stimulator

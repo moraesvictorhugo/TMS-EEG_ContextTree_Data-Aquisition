@@ -21,11 +21,10 @@ class NavigationTracker:
         Number of remote-control connections (relay servers).
     """
 
-    def __init__(self, number_of_rc):
-        self.number_of_rc = number_of_rc
-        self.rc = [None] * number_of_rc
-        self.target_status = [None] * number_of_rc
-        self.marker_label = [None] * number_of_rc
+    def __init__(self):
+        self.rc = []
+        self.target_status = []
+        self.marker_label = []
         self.all_target_status = None
 
         self.status_lock = threading.Lock()
@@ -43,6 +42,11 @@ class NavigationTracker:
         ports : list[int]
             List of port numbers, one per remote-control connection.
         """
+        number_of_rc = len(ports)
+        self.rc = [None] * number_of_rc
+        self.target_status = [None] * number_of_rc
+        self.marker_label = [None] * number_of_rc
+
         for i, port in enumerate(ports):
             self.rc[i] = RemoteControl(f"http://{address}:{port}")
             self.rc[i].try_connect()

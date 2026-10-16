@@ -54,3 +54,6 @@ MAGVENTURE_PORT = "COM1"
 ESP32_SERIAL_PORT = "COM3"
 ESP32_BAUD_RATE = 115200
 ESP32_STARTUP_DELAY = 2       # seconds to wait for ESP32 reboot after serial open
+
+# ─── Debug and Logging ───────────────────────────────────────────────
+ENABLE_LOGGING = True         # Toggle to enable verbose print statements

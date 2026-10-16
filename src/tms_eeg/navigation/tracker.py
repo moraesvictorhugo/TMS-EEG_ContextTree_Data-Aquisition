@@ -10,6 +10,8 @@ import threading
 
 from tms_eeg.navigation.remote_control import RemoteControl
 from tms_eeg import config
+from tms_eeg.logger import log
+import traceback
 
 
 class NavigationTracker:
@@ -62,6 +64,7 @@ class NavigationTracker:
                 new_target, new_marker = self._process_buffer(
                     rc, self.target_status[i], self.marker_label[i]
                 )
+                log(f"Processed buffer for RC {i}. New Target: {new_target}, New Marker: {new_marker}", "DEBUG")
                 with self.status_lock:
                     self.target_status[i] = new_target
                     self.marker_label[i] = new_marker
@@ -88,10 +91,14 @@ class NavigationTracker:
         buffer = rc.get_buffer()
 
         for msg in buffer:
-            if msg["topic"] == config.PUB_MESSAGES[0]:
-                target = msg["data"]["state"]
-            elif msg["topic"] == config.PUB_MESSAGES[1]:
-                marker = msg["data"]["name"]
+            try:
+                if msg["topic"] == config.PUB_MESSAGES[0]:
+                    target = msg["data"]["state"]
+                elif msg["topic"] == config.PUB_MESSAGES[1]:
+                    marker = msg["data"]["name"]
+            except Exception as e:
+                error_details = traceback.format_exc()
+                log(f"Exception processing buffer message '{msg}':\n{error_details}", "ERROR")
 
         time.sleep(0.1)
         return target, marker

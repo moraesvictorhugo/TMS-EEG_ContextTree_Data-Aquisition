@@ -18,7 +18,7 @@ from tms_eeg.sequence import (
     print_sequence_stats,
     export_sequence,
 )
-from tms_eeg.hardware.stimulator import StimulatorController
+from tms_eeg.hardware.stimulator import StimulatorController, validate_protocol
 from tms_eeg.hardware.trigger import TriggerSender
 from tms_eeg.navigation.tracker import NavigationTracker
 from tms_eeg.logger import log
@@ -98,12 +98,17 @@ def run_experiment(sequence, tracker, stimulator, trigger):
         # ── fire pulse ────────────────────────────────────────────────
         try:
             stimulus = sequence[pulse_index]
-            intensity = config.INTENSITY_MAP[stimulus]
-            log(f"Sequence requested stimulus: {stimulus}, Intensity mapping: {intensity}", "DEBUG")
-            print(f"Intensity: {intensity} (event {stimulus})")
+            if config.MODE == "paired-pulse":
+                profile = config.PULSE_MAP[stimulus]
+                print(f"Pulse profile: {profile} (event {stimulus})")
+                stimulator.prepare_stimulus(profile)
+            else:
+                intensity = config.INTENSITY_MAP[stimulus]
+                log(f"Sequence requested stimulus: {stimulus}, Intensity mapping: {intensity}", "DEBUG")
+                print(f"Intensity: {intensity} (event {stimulus})")
 
-            log("Calling stimulator.prepare_pulse()", "DEBUG")
-            stimulator.prepare_pulse(intensity)
+                log("Calling stimulator.prepare_pulse()", "DEBUG")
+                stimulator.prepare_pulse(intensity)
             log("Stimulator armed successfully.", "DEBUG")
 
             with tracker.status_lock:
@@ -145,6 +150,8 @@ def run_experiment(sequence, tracker, stimulator, trigger):
 def main():
     """Set up all subsystems and run the experiment."""
 
+    validate_protocol(config.MODE, config.ALPHABET, config.PULSE_MAP, config.PULSE_WAVEFORM)
+
     # 1. Sequence generation
     if config.SEQUENCE_ALGORITHM == "context tree":
         sequence = generate_sequence(config.NUMBER_OF_STIMULI, config.ALPHABET)
@@ -159,6 +166,12 @@ def main():
         )
     print(f"Sequence algorithm: {config.SEQUENCE_ALGORITHM}")
     print_sequence_stats(sequence)
+    if config.MODE == "paired-pulse":
+        # Validate actual output too: context-tree transitions can emit 0/1/2
+        # even if the supplied alphabet only restricted its initial symbol.
+        validate_protocol(config.MODE, sorted(set(sequence)), config.PULSE_MAP,
+                          config.PULSE_WAVEFORM)
+        print(f"Requested pulse profiles (% MSO, IPI in ms): {config.PULSE_MAP}")
 
     if config.EXPORT_SEQUENCE_TXT:
         export_sequence(
@@ -173,7 +186,12 @@ def main():
     tracker.connect(config.NAVIGATION_ADDRESS, config.NAVIGATION_PORTS)
 
     # 3. Connect stimulator
-    stimulator = StimulatorController(config.MAGVENTURE_PORT)
+    if config.MODE == "paired-pulse":
+        stimulator = StimulatorController(
+            config.MAGVENTURE_PORT, paired_pulse=True, waveform=config.PULSE_WAVEFORM
+        )
+    else:
+        stimulator = StimulatorController(config.MAGVENTURE_PORT)
     stimulator.connect()
 
     # 4. Connect ESP32 trigger

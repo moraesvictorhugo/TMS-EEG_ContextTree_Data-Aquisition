@@ -9,6 +9,53 @@ import traceback
 
 import magicpy as mp
 from tms_eeg.logger import log
+from tms_eeg.hardware.magicpy_adapter import PairedPulseMagVenture, ipi_ticks
+
+
+def validate_profile(profile):
+    """Reject invalid settings before issuing any device commands."""
+    if not isinstance(profile, dict):
+        raise ValueError("Each pulse profile must be a dictionary.")
+    if profile.get("type") not in ("single", "paired"):
+        raise ValueError("Pulse type must be 'single' or 'paired'.")
+    if not isinstance(profile.get("label"), str) or not profile["label"].strip():
+        raise ValueError("Each pulse profile needs a nonempty label.")
+    fields = ["a_intensity"]
+    if profile["type"] == "paired":
+        fields.append("b_intensity")
+        ipi_ticks(profile.get("ipi_ms"))
+    elif "b_intensity" in profile or "ipi_ms" in profile:
+        raise ValueError("Single pulses must not specify B intensity or IPI.")
+    for field in fields:
+        value = profile.get(field)
+        if type(value) is not int or not 0 <= value <= 100:
+            raise ValueError(f"{field} must be an integer between 0 and 100 % MSO.")
+
+
+def validate_protocol(mode, alphabet, pulse_map, waveform):
+    """Validate the opt-in protocol without connecting any subsystem."""
+    if mode not in ("intensity", "paired-pulse"):
+        raise ValueError(f"Unknown MODE: {mode!r}")
+    if mode == "intensity":
+        return
+    if waveform not in ("Monophasic", "Biphasic", "HalfSine"):
+        raise ValueError("PULSE_WAVEFORM must be Monophasic, Biphasic or HalfSine (no burst).")
+    if not isinstance(pulse_map, dict) or not alphabet:
+        raise ValueError("PULSE_MAP and ALPHABET must be nonempty.")
+    for symbol in alphabet:
+        if type(symbol) is not int or not 0 <= symbol <= 14:
+            raise ValueError("Symbols must be integers 0–14 for EEG triggers 1–15.")
+        if symbol not in pulse_map:
+            raise ValueError(f"Missing pulse profile for symbol {symbol}.")
+        validate_profile(pulse_map[symbol])
+
+
+def _checked(result, operation):
+    """MagicPy reports communication errors in a tuple, not just exceptions."""
+    response, error = result
+    if error != 0:
+        raise RuntimeError(f"MagicPy {operation} failed: {response!r} (error={error!r})")
+    return response
 
 
 class StimulatorController:
@@ -18,11 +65,18 @@ class StimulatorController:
     ----------
     port : str
         Serial port the stimulator is connected to (e.g. ``"COM1"``).
+    paired_pulse : bool, optional
+        Opt into the local IPI adapter and profile preparation guard.
+    waveform : str, optional
+        Explicit non-burst waveform used only for profile preparation.
     """
 
-    def __init__(self, port):
+    def __init__(self, port, paired_pulse=False, waveform="Biphasic"):
         self._port = port
         self._stimulator = None
+        self._paired_pulse = paired_pulse
+        self._waveform = waveform
+        self._prepared = False
 
     # ── connection ────────────────────────────────────────────────────
     def connect(self):
@@ -35,7 +89,8 @@ class StimulatorController:
         )
         log(f"Connecting to MagVenture on {self._port}...", "INFO")
         try:
-            self._stimulator = mp.MagVenture(self._port)
+            device_class = PairedPulseMagVenture if self._paired_pulse else mp.MagVenture
+            self._stimulator = device_class(self._port)
             self._stimulator.connect()
             self._stimulator.set_page("Main", get_response=False)
             log("Connected to MagVenture successfully.", "INFO")
@@ -72,9 +127,49 @@ class StimulatorController:
             log(f"Error in prepare_pulse:\n{traceback.format_exc()}", "ERROR")
             raise
 
+    def prepare_stimulus(self, profile):
+        """Prepare one Standard/Dual event; never synthesize A/B timing in Python."""
+        self._prepared = False
+        if not self._paired_pulse:
+            raise RuntimeError("Pulse profiles require the paired-pulse controller.")
+        validate_profile(profile)
+        if self._waveform not in ("Monophasic", "Biphasic", "HalfSine"):
+            raise ValueError("Unsupported non-burst waveform.")
+        mode = "Dual" if profile["type"] == "paired" else "Standard"
+        ipi = profile.get("ipi_ms", 10)
+        settings = dict(current_dir="Normal", n_pulses_per_burst=2,
+                        ipi=ipi, baratio=1, get_response=True)
+        log(f"Preparing requested pulse profile: {profile}; waveform={self._waveform}", "INFO")
+        _checked(self._stimulator.set_mode(mode=mode, **settings), "set_mode")
+        response = _checked(
+            self._stimulator.set_waveform(self._waveform, **settings), "set_waveform"
+        )
+        if not isinstance(response, dict) or any(
+            response.get(key) != expected
+            for key, expected in (("Mode", mode), ("Waveform", self._waveform),
+                                  ("CurrentDirection", "Normal"))
+        ):
+            raise RuntimeError(f"Stimulator mode/waveform readback mismatch: {response!r}")
+        time.sleep(1)
+        _checked(self._stimulator.arm(get_response=True), "arm")
+        time.sleep(1)
+        _checked(self._stimulator.set_amplitude(
+            profile["a_intensity"], b_amp=profile.get("b_intensity"), get_response=True
+        ), "set_amplitude")
+        time.sleep(1)
+        actual_mode = _checked(self._stimulator.get_mode(), "get_mode")
+        actual_ipi = _checked(self._stimulator.get_ipi(), "get_ipi")
+        if actual_mode != mode or ipi_ticks(actual_ipi) != ipi_ticks(ipi):
+            raise RuntimeError(f"Stimulator mode/IPI readback mismatch: {actual_mode!r}, {actual_ipi!r}")
+        self._prepared = True
+
     # ── firing ────────────────────────────────────────────────────────
     def fire(self):
-        """Fire a single TMS pulse."""
+        """Fire one configured event (one physical pulse or an A/B pair)."""
+        if self._paired_pulse:
+            if not self._prepared:
+                raise RuntimeError("No successfully prepared pulse profile.")
+            self._prepared = False
         try:
             log("Sending fire command to MagVenture...", "DEBUG")
             self._stimulator.fire()

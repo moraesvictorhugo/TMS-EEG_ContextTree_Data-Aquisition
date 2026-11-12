@@ -19,6 +19,20 @@ execution, so they do not connect equipment or fire pulses. They check:
 | Text export | Both filename prefixes and numeric content; legacy calls remain valid |
 | Startup selection | Both algorithms are selected correctly, with optional export |
 | Invalid configuration | Unknown algorithms and invalid pseudo-random inputs fail before hardware |
+| Paired-pulse adapter | Exact 1–200 ms encoding, rejection of invalid IPIs, original library unchanged |
+| MagicPy compatibility | Adapter encoding matches 0.1.6 across 10–100 ms in 0.1 ms steps |
+| Profile preparation | Standard/Dual, independent A/B intensities, waveform and IPI readback |
+| Generic paired conditions | Arbitrary SICI/LICI labels and preparation with 150/200 ms IPIs |
+| Long-interval readback | Real MagicPy decoder with synthetic Dual replies; mismatched values block firing without rounding |
+| Preparation failures | Communication/readback errors and stale preparation block firing |
+| Protocol integration | Opt-in controller, invalid profiles before connections, both sequence algorithms |
+| Event loop | One fire/EEG code per event, legacy path preserved, preparation failure never fires |
+
+All controller/loop tests use mocks and bypass sleeps, keyboard and serial access.
+They do not establish physical hardware support. Before experimental use, verify
+Dual mode, waveform, pulse count, A/B amplitudes and IPI on the actual system,
+including transitions from paired to single. Readback failures must be investigated,
+not bypassed. Keep `MODE = "intensity"` until this validation is complete.
 
 The hardware modules (stimulator, ESP32 trigger, neuronavigation) require the physical equipment and are verified manually in the lab.
 

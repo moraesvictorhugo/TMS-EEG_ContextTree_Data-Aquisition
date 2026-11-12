@@ -5,7 +5,7 @@ Edit the values below before each experiment session.
 """
 
 # ─── Experiment protocol ──────────────────────────────────────────────
-MODE = "intensity"            # protocol type (currently only "intensity")
+MODE = "intensity"            # "intensity" (legacy) or "paired-pulse"
 VOLUNTEER_CODE = "V00"        # volunteer identifier
 EXPORT_SEQUENCE_TXT = False   # whether to save the generated sequence to a .txt file
 
@@ -22,6 +22,25 @@ INTENSITY_MAP = {
     0: INTENSITY_0,
     1: INTENSITY_1,
     2: INTENSITY_2,
+}
+
+# ─── Simple/paired protocol (used only with MODE = "paired-pulse") ────
+# EXAMPLE settings, not a validated experimental prescription. Intensities
+# are integer % MSO. Confirm device/firmware Dual support and measure A/B timing.
+# A = conditioning pulse, B = test pulse. IPI is onset A to onset B in ms.
+# Labels are arbitrary: e.g. rename paired_1/paired_2 to SICI/LICI. They do not
+# select a protocol automatically. Software IPI range: 1–200 ms; verify readback.
+PULSE_WAVEFORM = "Biphasic"    # "Monophasic", "Biphasic" or "HalfSine"; no burst
+PULSE_MAP = {
+    0: {"label": "single", "type": "single", "a_intensity": INTENSITY_2},
+    1: {
+        "label": "paired_1", "type": "paired",
+        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 8.0,
+    },
+    2: {
+        "label": "paired_2", "type": "paired",
+        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 2.5,
+    },
 }
 
 # ─── Sequence generation ─────────────────────────────────────────────

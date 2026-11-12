@@ -1,5 +1,6 @@
 """Test startup selection without connecting or firing physical equipment."""
 from unittest.mock import Mock
+from threading import Lock
 
 import pytest
 
@@ -8,6 +9,7 @@ from tms_eeg import main as experiment
 
 @pytest.fixture
 def startup_mocks(monkeypatch):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
     names = (
         "generate_sequence",
         "generate_pseudo_random_sequence",
@@ -74,6 +76,86 @@ def test_unknown_algorithm_fails_before_hardware(monkeypatch, startup_mocks):
 
     for mock in startup_mocks.values():
         mock.assert_not_called()
+
+
+@pytest.mark.parametrize("algorithm", ["context tree", "pseudo-random"])
+def test_paired_startup(monkeypatch, startup_mocks, algorithm):
+    monkeypatch.setattr(experiment.config, "MODE", "paired-pulse")
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", algorithm)
+    monkeypatch.setattr(experiment.config, "EXPORT_SEQUENCE_TXT", False)
+    for name in ("generate_sequence", "generate_pseudo_random_sequence"):
+        startup_mocks[name].return_value = [0, 1, 2]
+    experiment.main()
+    startup_mocks["StimulatorController"].assert_called_once_with(
+        experiment.config.MAGVENTURE_PORT, paired_pulse=True,
+        waveform=experiment.config.PULSE_WAVEFORM,
+    )
+    startup_mocks["run_experiment"].assert_called_once()
+
+
+@pytest.mark.parametrize("bad_config", ["mode", "profile", "waveform"])
+def test_invalid_protocol_fails_before_connections(monkeypatch, startup_mocks, bad_config):
+    monkeypatch.setattr(experiment.config, "MODE", "paired-pulse")
+    if bad_config == "mode":
+        monkeypatch.setattr(experiment.config, "MODE", "invalid")
+    elif bad_config == "profile":
+        monkeypatch.setattr(experiment.config, "PULSE_MAP", {})
+    else:
+        monkeypatch.setattr(experiment.config, "PULSE_WAVEFORM", "BiphasicBurst")
+    with pytest.raises(ValueError):
+        experiment.main()
+    for mock in startup_mocks.values():
+        mock.assert_not_called()
+
+
+def test_actual_tree_output_profiles_validated(monkeypatch, startup_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "paired-pulse")
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", "context tree")
+    monkeypatch.setattr(experiment.config, "ALPHABET", [0])
+    monkeypatch.setattr(experiment.config, "PULSE_MAP", {0: experiment.config.PULSE_MAP[0]})
+    startup_mocks["generate_sequence"].return_value = [0, 1, 2]
+    with pytest.raises(ValueError, match="Missing pulse profile"):
+        experiment.main()
+    startup_mocks["NavigationTracker"].assert_not_called()
+    startup_mocks["StimulatorController"].assert_not_called()
+
+
+@pytest.fixture
+def loop_mocks(monkeypatch):
+    monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 1)
+    monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: False)
+    monkeypatch.setattr(experiment.time, "sleep", Mock())
+    tracker = Mock(all_target_status=True, status_lock=Lock())
+    return tracker, Mock(), Mock()
+
+
+@pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
+def test_loop_one_fire_and_trigger_per_event(monkeypatch, loop_mocks, mode):
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    tracker, stimulator, trigger = loop_mocks
+    experiment.run_experiment([0, 1, 2, 0], tracker, stimulator, trigger)
+    assert stimulator.fire.call_count == 4
+    assert [c.args[0] for c in trigger.send.call_args_list] == [1, 2, 3, 1]
+    selected = stimulator.prepare_stimulus if mode == "paired-pulse" else stimulator.prepare_pulse
+    unused = stimulator.prepare_pulse if mode == "paired-pulse" else stimulator.prepare_stimulus
+    profiles = experiment.config.PULSE_MAP if mode == "paired-pulse" else experiment.config.INTENSITY_MAP
+    assert [c.args[0] for c in selected.call_args_list] == [profiles[s] for s in [0, 1, 2, 0]]
+    unused.assert_not_called()
+
+
+def test_loop_preparation_failure_does_not_fire(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "paired-pulse")
+    tracker, stimulator, trigger = loop_mocks
+    stimulator.prepare_stimulus.side_effect = RuntimeError("configuration failed")
+    # Interrupt at the retry wait to inspect one failed attempt, without looping.
+    def stop_on_retry(seconds):
+        if seconds == 2:
+            raise KeyboardInterrupt
+    monkeypatch.setattr(experiment.time, "sleep", stop_on_retry)
+    with pytest.raises(KeyboardInterrupt):
+        experiment.run_experiment([2], tracker, stimulator, trigger)
+    stimulator.fire.assert_not_called()
+    trigger.send.assert_not_called()
 
 
 def test_invalid_pseudo_random_input_fails_before_hardware(monkeypatch, startup_mocks):

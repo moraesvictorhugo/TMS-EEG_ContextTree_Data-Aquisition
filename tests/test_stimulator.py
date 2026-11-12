@@ -175,3 +175,26 @@ def test_extended_ipi_readback_is_not_silently_rounded(controller):
     with pytest.raises(RuntimeError, match="prepared"):
         controller.fire()
     controller._stimulator.fire.assert_not_called()
+
+
+def test_disarm_invalidates_preparation(controller):
+    controller.prepare_stimulus(config.PULSE_MAP[2])
+    controller._stimulator.disarm.return_value = ({}, 0)
+    controller.disarm()
+    controller._stimulator.disarm.assert_called_once_with(get_response=True)
+    with pytest.raises(RuntimeError, match="prepared"):
+        controller.fire()
+
+
+def test_close_disconnects_even_after_failed_disarm(controller, monkeypatch, capsys):
+    monkeypatch.setattr(config, "ENABLE_LOGGING", False)
+    controller._prepared = True
+    controller._stimulator.disarm.return_value = ("Empty", 1)
+    controller.close()
+    assert not controller._prepared
+    controller._stimulator.disconnect.assert_called_once_with()
+    assert "NOT confirmed" in capsys.readouterr().out
+
+
+def test_close_before_connection():
+    module.StimulatorController("unused").close()

@@ -9,6 +9,8 @@ This script orchestrates the full experiment:
 import random
 import time
 import traceback
+import math
+from numbers import Real
 from collections import deque
 import keyboard
 from tms_eeg import config
@@ -40,6 +42,38 @@ def wait_for_key(key, prompt):
             break
 
 
+def validate_settings(sequence=None):
+    """Check basic acquisition settings before opening any connections."""
+    for name in ("NUMBER_OF_STIMULI", "TARGET_HISTORY_SIZE"):
+        value = getattr(config, name)
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"{name} must be a positive integer.")
+    if not isinstance(config.ITI, (tuple, list)) or len(config.ITI) != 2:
+        raise ValueError("ITI must contain two finite, non-negative values.")
+    if any(isinstance(v, bool) or not isinstance(v, Real) or
+           not math.isfinite(v) or v < 0 for v in config.ITI) or config.ITI[0] > config.ITI[1]:
+        raise ValueError("ITI must be finite, non-negative and ordered.")
+    if sequence is None:
+        return
+    for symbol in sequence:
+        if type(symbol) is not int or not 0 <= symbol <= 14:
+            raise ValueError("Sequence symbols must be integers 0–14 (EEG codes 1–15).")
+        if config.MODE == "intensity":
+            intensity = config.INTENSITY_MAP.get(symbol)
+            if type(intensity) is not int or not 0 <= intensity <= 100:
+                raise ValueError(f"Invalid or missing intensity for symbol {symbol}.")
+
+
+def cleanup(stimulator, trigger, tracker):
+    """Release partially initialized resources without masking the primary error."""
+    for resource, method in ((stimulator, "close"), (trigger, "close"), (tracker, "stop")):
+        if resource is not None:
+            try:
+                getattr(resource, method)()
+            except Exception as error:
+                print(f"WARNING: cleanup {method} failed: {error}")
+
+
 def run_experiment(sequence, tracker, stimulator, trigger):
     """Execute the main experiment loop.
 
@@ -64,6 +98,9 @@ def run_experiment(sequence, tracker, stimulator, trigger):
 
     pulse_index = 0
     paused = False
+    preparation_failures = 0
+    disarm_blocked = False
+    retry_key_was_pressed = False
 
     while True:
         # ── safety bounds check ───────────────────────────────────────
@@ -71,13 +108,34 @@ def run_experiment(sequence, tracker, stimulator, trigger):
             log(f"Safety bounds check: pulse_index ({pulse_index}) >= sequence length ({len(sequence)}). Breaking loop.", "DEBUG")
             break
 
+        # A target-loss disarm failure preserves this event in memory. Only
+        # an explicit R press may retry disarm; G/target recovery cannot bypass it.
+        if disarm_blocked:
+            retry_pressed = keyboard.is_pressed("r")
+            if retry_pressed and not retry_key_was_pressed:
+                try:
+                    stimulator.disarm()
+                except Exception as error:
+                    print(f"Disarm still unconfirmed: {error}. Press R again to retry; no firing allowed.")
+                else:
+                    disarm_blocked = False
+                    target_history.clear()
+                    target_history.extend([False] * config.TARGET_HISTORY_SIZE)
+                    print(f"Disarm confirmed. Waiting for target at event {pulse_index + 1}.")
+            retry_key_was_pressed = retry_pressed
+            time.sleep(0.05)
+            continue
+
         # ── pause / resume ────────────────────────────────────────────
-        if keyboard.is_pressed("b"):
+        if keyboard.is_pressed("b") and not paused:
+            stimulator.disarm()
             paused = True
             log("Paused sequence (key B).", "INFO")
             print("Paused sequence (key B).")
         if keyboard.is_pressed("g") and paused:
             paused = False
+            target_history.clear()
+            target_history.extend([False] * config.TARGET_HISTORY_SIZE)
             log("Sequence resumed (key G).", "INFO")
             print("Sequence resumed (key G).")
 
@@ -96,8 +154,10 @@ def run_experiment(sequence, tracker, stimulator, trigger):
         log(f"Target tracking passed. Preparing to fire pulse {pulse_index + 1}.", "DEBUG")
 
         # ── fire pulse ────────────────────────────────────────────────
+        fire_attempted = False
+        stage = "preparation"
+        stimulus = sequence[pulse_index]
         try:
-            stimulus = sequence[pulse_index]
             if config.MODE == "paired-pulse":
                 profile = config.PULSE_MAP[stimulus]
                 print(f"Pulse profile: {profile} (event {stimulus})")
@@ -112,18 +172,31 @@ def run_experiment(sequence, tracker, stimulator, trigger):
             log("Stimulator armed successfully.", "DEBUG")
 
             with tracker.status_lock:
-                if not tracker.all_target_status:
-                    log("Coil moved out of target right before firing. Restarting gate.", "WARNING")
-                    print("⚠️ Coil out of target. Restarting gate...")
-                    target_history.clear()
-                    target_history.extend([False] * config.TARGET_HISTORY_SIZE)
-                    continue
+                target_lost = not tracker.all_target_status
+                if not target_lost:
+                    log("Calling stimulator.fire()", "DEBUG")
+                    stage = "fire (delivery uncertain on failure)"
+                    fire_attempted = True
+                    stimulator.fire()
+                    # trigger for EEG: 0→1, 1→2, 2→3
+                    log(f"Sending trigger value: {stimulus + 1}", "DEBUG")
+                    stage = "EEG trigger after fire"
+                    trigger.send(stimulus + 1)
 
-                log("Calling stimulator.fire()", "DEBUG")
-                stimulator.fire()
-                # trigger for EEG: 0→1, 1→2, 2→3
-                log(f"Sending trigger value: {stimulus + 1}", "DEBUG")
-                trigger.send(stimulus + 1)
+            if target_lost:
+                # Normal operational wait, not a failed preparation. Release
+                # the navigation lock before serial I/O so tracking can update.
+                print(f"Coil out of target. Waiting at event {pulse_index + 1}; sequence preserved.")
+                target_history.clear()
+                target_history.extend([False] * config.TARGET_HISTORY_SIZE)
+                try:
+                    stimulator.disarm()
+                except Exception as error:
+                    disarm_blocked = True
+                    retry_key_was_pressed = False
+                    print(f"Disarm NOT confirmed: {error}. Event {pulse_index + 1} preserved; "
+                          "firing blocked. Check device, then press R to retry disarm (Ctrl+C to exit).")
+                continue
 
             print("Firing")
             time.sleep(random.uniform(*config.ITI))
@@ -131,12 +204,29 @@ def run_experiment(sequence, tracker, stimulator, trigger):
             print(f"Pulse index: {pulse_index + 1}")
             log(f"Pulse index {pulse_index} successfully fired.", "INFO")
             pulse_index += 1
+            preparation_failures = 0
 
         except Exception as e:
             error_details = traceback.format_exc()
             log(f"Exception during pulse firing:\n{error_details}", "ERROR")
             print(f"\n⚠️ ERRO in pulse {pulse_index}: {e}")
-            print("Trying again the same pulse...\n")
+            print(f"Event index={pulse_index}, symbol={stimulus}, stage={stage}.")
+            # An attempted fire may already have delivered a pulse, even if it raised.
+            # Disarm must succeed before considering any preparation retry.
+            if fire_attempted:
+                print("STOP: delivery/marking uncertain. Event will NOT be repeated.")
+            try:
+                stimulator.disarm()
+            except Exception as disarm_error:
+                print(f"STOP: disarm not confirmed: {disarm_error}. No retry allowed.")
+                raise e from disarm_error
+            if fire_attempted:
+                raise
+            preparation_failures += 1
+            if preparation_failures >= 3:
+                print("STOP: three preparation failures for this event.")
+                raise
+            print(f"Retrying preparation ({preparation_failures + 1}/3) after confirmed disarm.")
             time.sleep(2)
 
         # ── end condition ─────────────────────────────────────────────
@@ -151,6 +241,7 @@ def main():
     """Set up all subsystems and run the experiment."""
 
     validate_protocol(config.MODE, config.ALPHABET, config.PULSE_MAP, config.PULSE_WAVEFORM)
+    validate_settings()
 
     # 1. Sequence generation
     if config.SEQUENCE_ALGORITHM == "context tree":
@@ -165,6 +256,7 @@ def main():
             "Expected 'context tree' or 'pseudo-random'."
         )
     print(f"Sequence algorithm: {config.SEQUENCE_ALGORITHM}")
+    validate_settings(sequence)
     print_sequence_stats(sequence)
     if config.MODE == "paired-pulse":
         # Validate actual output too: context-tree transitions can emit 0/1/2
@@ -181,36 +273,28 @@ def main():
             algorithm=config.SEQUENCE_ALGORITHM,
         )
 
-    # 2. Connect neuronavigation
-    tracker = NavigationTracker()
-    tracker.connect(config.NAVIGATION_ADDRESS, config.NAVIGATION_PORTS)
-
-    # 3. Connect stimulator
-    if config.MODE == "paired-pulse":
-        stimulator = StimulatorController(
-            config.MAGVENTURE_PORT, paired_pulse=True, waveform=config.PULSE_WAVEFORM
-        )
-    else:
-        stimulator = StimulatorController(config.MAGVENTURE_PORT)
-    stimulator.connect()
-
-    # 4. Connect ESP32 trigger
-    trigger = TriggerSender(
-        config.ESP32_SERIAL_PORT,
-        config.ESP32_BAUD_RATE,
-        config.ESP32_STARTUP_DELAY,
-    )
-
-    # 5. Wait for operator
-    wait_for_key("s", "Press the 's' key to start the pulses....")
-    print("start sequence")
-
-    # 6. Run experiment
+    tracker = stimulator = trigger = None
     try:
+        # Include partial startup and the operator wait in the cleanup scope.
+        tracker = NavigationTracker()
+        tracker.connect(config.NAVIGATION_ADDRESS, config.NAVIGATION_PORTS)
+        if config.MODE == "paired-pulse":
+            stimulator = StimulatorController(
+                config.MAGVENTURE_PORT, paired_pulse=True, waveform=config.PULSE_WAVEFORM
+            )
+        else:
+            stimulator = StimulatorController(config.MAGVENTURE_PORT)
+        stimulator.connect()
+        trigger = TriggerSender(
+            config.ESP32_SERIAL_PORT,
+            config.ESP32_BAUD_RATE,
+            config.ESP32_STARTUP_DELAY,
+        )
+        wait_for_key("s", "Press the 's' key to start the pulses....")
+        print("start sequence")
         run_experiment(sequence, tracker, stimulator, trigger)
     finally:
-        trigger.close()
-        tracker.stop()
+        cleanup(stimulator, trigger, tracker)
 
 
 if __name__ == "__main__":

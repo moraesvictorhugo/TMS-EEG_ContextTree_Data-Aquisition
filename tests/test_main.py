@@ -22,6 +22,8 @@ def startup_mocks(monkeypatch):
         "run_experiment",
     )
     mocks = {name: Mock() for name in names}
+    mocks["generate_sequence"].return_value = [0, 1, 2]
+    mocks["generate_pseudo_random_sequence"].return_value = [0, 1, 2]
     for name, mock in mocks.items():
         monkeypatch.setattr(experiment, name, mock)
     monkeypatch.setattr(experiment.config, "NUMBER_OF_STIMULI", 3)
@@ -172,3 +174,231 @@ def test_invalid_pseudo_random_input_fails_before_hardware(monkeypatch, startup_
 
     for mock in startup_mocks.values():
         mock.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
+def test_preparation_retry_limit(monkeypatch, loop_mocks, mode):
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    tracker, stimulator, trigger = loop_mocks
+    prepare = stimulator.prepare_pulse if mode == "intensity" else stimulator.prepare_stimulus
+    prepare.side_effect = RuntimeError("prepare failed")
+    with pytest.raises(RuntimeError, match="prepare failed"):
+        experiment.run_experiment([0], tracker, stimulator, trigger)
+    assert prepare.call_count == 3
+    assert stimulator.disarm.call_count == 3
+    stimulator.fire.assert_not_called()
+
+
+def test_preparation_recovers_after_disarm(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    stimulator.prepare_pulse.side_effect = [RuntimeError("temporary"), None]
+    experiment.run_experiment([0], tracker, stimulator, trigger)
+    assert stimulator.prepare_pulse.call_count == 2
+    stimulator.disarm.assert_called_once_with()
+    stimulator.fire.assert_called_once_with()
+
+
+def test_preparation_failure_counter_resets_after_success(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    stimulator.prepare_pulse.side_effect = [
+        RuntimeError("temporary"), RuntimeError("temporary"), None,
+        RuntimeError("temporary"), RuntimeError("temporary"), None,
+    ]
+    experiment.run_experiment([0, 1], tracker, stimulator, trigger)
+    assert stimulator.fire.call_count == 2
+    assert stimulator.disarm.call_count == 4
+
+
+def test_failed_target_loss_disarm_waits_without_repreparation(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    stimulator.prepare_pulse.side_effect = lambda value: setattr(tracker, "all_target_status", False)
+    stimulator.disarm.side_effect = [RuntimeError("first disarm failed"), None]
+    def interrupt_wait(key):
+        if key == "r":
+            raise KeyboardInterrupt
+        return False
+    monkeypatch.setattr(experiment.keyboard, "is_pressed", interrupt_wait)
+    with pytest.raises(KeyboardInterrupt):
+        experiment.run_experiment([0], tracker, stimulator, trigger)
+    stimulator.prepare_pulse.assert_called_once()
+    stimulator.fire.assert_not_called()
+    stimulator.disarm.assert_called_once()
+
+
+@pytest.mark.parametrize("failure", ["fire", "trigger"])
+def test_attempted_fire_never_retried(monkeypatch, loop_mocks, failure):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    failing = stimulator.fire if failure == "fire" else trigger.send
+    failing.side_effect = RuntimeError("delivery uncertain")
+    with pytest.raises(RuntimeError, match="delivery uncertain"):
+        experiment.run_experiment([0, 1], tracker, stimulator, trigger)
+    stimulator.fire.assert_called_once_with()
+    stimulator.prepare_pulse.assert_called_once()
+    stimulator.disarm.assert_called_once_with()
+
+
+def test_disarm_failure_prevents_retry(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    stimulator.prepare_pulse.side_effect = RuntimeError("prepare")
+    stimulator.disarm.side_effect = RuntimeError("disarm")
+    with pytest.raises(RuntimeError, match="prepare") as error:
+        experiment.run_experiment([0], tracker, stimulator, trigger)
+    assert str(error.value.__cause__) == "disarm"
+    stimulator.prepare_pulse.assert_called_once()
+    stimulator.fire.assert_not_called()
+
+
+def test_pause_disarms_only_once_and_resume_rechecks_gate(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    keys = iter([True, False, True, False, False, True])
+    monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: next(keys))
+    experiment.run_experiment([0], tracker, stimulator, trigger)
+    stimulator.disarm.assert_called_once_with()
+    stimulator.fire.assert_called_once_with()
+
+
+def test_target_loss_disarms_before_repreparation(monkeypatch, loop_mocks):
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    tracker, stimulator, trigger = loop_mocks
+    def prepare(value):
+        if stimulator.prepare_pulse.call_count == 1:
+            tracker.all_target_status = False
+    stimulator.prepare_pulse.side_effect = prepare
+    original_disarm = stimulator.disarm
+    original_disarm.side_effect = lambda: setattr(tracker, "all_target_status", True)
+    experiment.run_experiment([0], tracker, stimulator, trigger)
+    assert stimulator.prepare_pulse.call_count == 2
+    stimulator.disarm.assert_called_once_with()
+    stimulator.fire.assert_called_once_with()
+
+
+@pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
+def test_repeated_target_loss_preserves_full_sequence(monkeypatch, loop_mocks, mode):
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 3)
+    tracker, stimulator, trigger = loop_mocks
+    sequence = [0, 2, 1, 0]
+    original = sequence.copy()
+    tracker.all_target_status = False
+    waits = 0
+    losses = 0
+    recovery_at = 8
+    prepare = stimulator.prepare_pulse if mode == "intensity" else stimulator.prepare_stimulus
+    mapping = experiment.config.INTENSITY_MAP if mode == "intensity" else experiment.config.PULSE_MAP
+    fired = []
+    def sleep(seconds):
+        nonlocal waits
+        waits += 1
+        assert waits < 200, "Loop failed to recover"
+        if not tracker.all_target_status and waits >= recovery_at:
+            tracker.all_target_status = True
+    def preparation(value):
+        nonlocal losses, recovery_at
+        if losses < 4:  # More than preparation retry limit, at the same event.
+            losses += 1
+            tracker.all_target_status = False
+            recovery_at = waits + 5
+    def fire():
+        nonlocal recovery_at
+        assert tracker.all_target_status
+        fired.append(prepare.call_args.args[0])
+        tracker.all_target_status = False  # Also lose target between events.
+        recovery_at = waits + 5
+    prepare.side_effect = preparation
+    stimulator.fire.side_effect = fire
+    monkeypatch.setattr(experiment.time, "sleep", sleep)
+    experiment.run_experiment(sequence, tracker, stimulator, trigger)
+    assert sequence == original
+    assert fired == [mapping[s] for s in original]
+    assert [c.args[0] for c in trigger.send.call_args_list] == [s + 1 for s in original]
+    assert stimulator.disarm.call_count == 4
+
+
+@pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
+def test_disarm_block_requires_explicit_press_and_preserves_index(monkeypatch, loop_mocks, mode):
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    tracker, stimulator, trigger = loop_mocks
+    prepare = stimulator.prepare_pulse if mode == "intensity" else stimulator.prepare_stimulus
+    # Lose target after event 0 completed, while preparing event 1.
+    def preparation(value):
+        if prepare.call_count == 2:
+            tracker.all_target_status = False
+    prepare.side_effect = preparation
+    stimulator.disarm.side_effect = [RuntimeError("lost ack"), RuntimeError("lost ack again"), None]
+    # G and target recovery do not unblock. Holding R after a failed retry
+    # must not flood the serial port: release and press again is required.
+    keys = iter([False, True, True, False, True])
+    polls = 0
+    def pressed(key):
+        nonlocal polls
+        if key == "r":
+            polls += 1
+            tracker.all_target_status = True
+            assert prepare.call_count == 2
+            assert stimulator.fire.call_count == 1
+            if polls == 3:
+                assert stimulator.disarm.call_count == 2
+            return next(keys)
+        return key == "g"
+    monkeypatch.setattr(experiment.keyboard, "is_pressed", pressed)
+    experiment.run_experiment([0, 2, 1], tracker, stimulator, trigger)
+    assert polls == 5
+    assert stimulator.disarm.call_count == 3
+    assert stimulator.fire.call_count == 3
+    assert [c.args[0] for c in trigger.send.call_args_list] == [1, 3, 2]
+    mapping = experiment.config.INTENSITY_MAP if mode == "intensity" else experiment.config.PULSE_MAP
+    assert [c.args[0] for c in prepare.call_args_list] == [mapping[s] for s in [0, 2, 2, 1]]
+
+
+@pytest.mark.parametrize("stage", ["navigation", "stimulator", "trigger", "wait", "run"])
+def test_partial_startup_and_interrupt_cleanup(monkeypatch, startup_mocks, stage):
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", "context tree")
+    monkeypatch.setattr(experiment.config, "EXPORT_SEQUENCE_TXT", False)
+    calls = {
+        "navigation": startup_mocks["NavigationTracker"].return_value.connect,
+        "stimulator": startup_mocks["StimulatorController"].return_value.connect,
+        "trigger": startup_mocks["TriggerSender"],
+        "wait": startup_mocks["wait_for_key"],
+        "run": startup_mocks["run_experiment"],
+    }
+    calls[stage].side_effect = KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        experiment.main()
+    startup_mocks["NavigationTracker"].return_value.stop.assert_called_once_with()
+    if stage != "navigation":
+        startup_mocks["StimulatorController"].return_value.close.assert_called_once_with()
+    if stage in ("wait", "run"):
+        startup_mocks["TriggerSender"].return_value.close.assert_called_once_with()
+
+
+def test_cleanup_failures_preserve_original_error(monkeypatch, startup_mocks):
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", "context tree")
+    monkeypatch.setattr(experiment.config, "EXPORT_SEQUENCE_TXT", False)
+    startup_mocks["run_experiment"].side_effect = ValueError("original")
+    startup_mocks["StimulatorController"].return_value.close.side_effect = RuntimeError("cleanup")
+    startup_mocks["TriggerSender"].return_value.close.side_effect = RuntimeError("cleanup")
+    with pytest.raises(ValueError, match="original"):
+        experiment.main()
+    startup_mocks["NavigationTracker"].return_value.stop.assert_called_once_with()
+
+
+@pytest.mark.parametrize("name, value", [
+    ("NUMBER_OF_STIMULI", 0), ("NUMBER_OF_STIMULI", True),
+    ("TARGET_HISTORY_SIZE", 0), ("TARGET_HISTORY_SIZE", 1.5),
+    ("ITI", (3, 1)), ("ITI", (-1, 2)), ("ITI", (0, float("nan"))),
+    ("ITI", (1,)), ("INTENSITY_MAP", {0: 101, 1: 10, 2: 12}),
+    ("INTENSITY_MAP", {}),
+])
+def test_basic_validation_before_connections(monkeypatch, startup_mocks, name, value):
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", "context tree")
+    monkeypatch.setattr(experiment.config, name, value)
+    with pytest.raises(ValueError):
+        experiment.main()
+    startup_mocks["NavigationTracker"].assert_not_called()
+    startup_mocks["StimulatorController"].assert_not_called()

@@ -27,6 +27,14 @@ execution, so they do not connect equipment or fire pulses. They check:
 | Preparation failures | Communication/readback errors and stale preparation block firing |
 | Protocol integration | Opt-in controller, invalid profiles before connections, both sequence algorithms |
 | Event loop | One fire/EEG code per event, legacy path preserved, preparation failure never fires |
+| Bounded recovery | Up to three preparation attempts; confirmed disarm required; counter resets after success |
+| Uncertain delivery | Fire/EEG errors stop without repeating an attempted event |
+| Pause/target loss | Disarm before waiting; resume reacquires target history |
+| Target continuity | Prolonged/repeated losses and losses between events preserve order/index in both modes |
+| Target-loss disarm block | R retries once per press; holding R, G and target recovery cannot bypass block; Ctrl+C exits |
+| Cleanup | Partial startup, operator wait, Ctrl+C and normal exit release resources independently |
+| Cleanup failures | Warnings visible with logging disabled; original exception preserved |
+| Basic settings | Trial count, history size, ITI and legacy intensity validation before connections |
 
 All controller/loop tests use mocks and bypass sleeps, keyboard and serial access.
 They do not establish physical hardware support. Before experimental use, verify

@@ -66,7 +66,8 @@ requires at least two symbols. Keep symbols mapped in `INTENSITY_MAP` (normally
 
 Intensity mapping, EEG triggers, timing, pause/resume and target tracking are
 unchanged. The no-repeat rule applies to the generated symbols, not hardware
-retries: the existing error handler can retry the same pulse after an exception.
+retries: only preparation failures before a fire attempt may be retried, after
+confirmed disarm (at most three preparation attempts per event).
 Different symbols imply different intensities only when their mapped values differ.
 
 With `EXPORT_SEQUENCE_TXT = True`, context-tree filenames retain the existing
@@ -131,14 +132,45 @@ is not proof of the equipment's capabilities. Do not change the non-burst
 waveform to `BiphasicBurst` to try to obtain pairs.
 
 The ESP32 firmware is unchanged: one EEG code marks the condition/event, not
-individually synchronized A/B onsets. Existing software-trigger jitter and retry
-behavior remain: an exception after firing can cause an event to be attempted
-again. Requested profiles are printed at startup and per event; use actual device
+individually synchronized A/B onsets. Existing software-trigger jitter remains.
+An exception during or after an attempted fire stops the sequence without
+repeating that event: delivery may be uncertain. Requested profiles are printed at startup and per event; use actual device
 records/measurements to confirm delivery. Preparation adds response/readback time
 in addition to the original waits; ITI remains the post-event wait, not a precise
 onset-to-onset trial interval.
 
 ## Testing
+
+### Minimal safety layers (both modes)
+
+- Preparation failures allow at most **three total attempts per event**, with the
+  existing two-second retry wait and confirmed disarm before retrying.
+- Any error during/after a fire attempt (including EEG marking) stops the session;
+  it does not resend the pulse or claim that delivery did not occur.
+- Failed disarm after preparation/fire errors stops retries; warnings remain
+  visible with logging disabled. Target-loss waiting has the recovery below.
+- Entering pause and losing target immediately before firing attempt disarm.
+  Resume clears target history and requires reacquiring the existing gate.
+- Coil out of target is an operational wait, not a preparation failure: the
+  original sequence/index remain in memory, without consuming retry attempts.
+  Once stable on target again, the same pending event is prepared and delivered.
+  If disarm after target loss is not confirmed, the session stays open but firing
+  is blocked. Check the device and press **R** to retry disarm once; release and
+  press again if needed. G or target recovery alone cannot bypass this block.
+  Confirmed disarm returns to the normal target gate at the same event. Ctrl+C
+  still exits. This is in-process continuity, not recovery after restarting Python.
+- Normal exit, Ctrl+C, startup failures and operator-wait interruptions attempt
+  stimulator disarm/disconnect, trigger close and tracker stop independently.
+  Closing a serial port is not proof of physical disarm; inspect the device if
+  acknowledgement fails. Software cleanup cannot handle power loss or forced kill.
+- Invalid trial count, target history size, ITI, actual symbols and legacy
+  intensities fail before opening equipment connections.
+
+Reported reference equipment: X100 + Option, C-B70; GUI 7.2.5, PIC1 5.5.2,
+PIC2 4.0.0, Nimbus 2.0.4. This records operator-provided identification, not a
+certification of firmware compatibility or physical safety. Normal preparation,
+post-event ITI, sequence algorithms and EEG codes are unchanged. No thermal
+limits, automatic reconnection or session recovery are implemented here.
 
 See [TESTING.md](TESTING.md) for details.
 
@@ -153,3 +185,4 @@ uv run pytest
 | `S` | Start the pulse sequence |
 | `B` | Pause the sequence |
 | `G` | Resume the sequence |
+| `R` | Retry unconfirmed disarm after target loss; never fires or skips an event |

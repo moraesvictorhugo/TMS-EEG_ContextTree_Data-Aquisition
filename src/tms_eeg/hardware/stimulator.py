@@ -179,11 +179,32 @@ class StimulatorController:
             raise
 
     # ── context manager ───────────────────────────────────────────────
+    def disarm(self):
+        """Invalidate preparation and require acknowledgement of disable command."""
+        self._prepared = False
+        if self._stimulator is not None:
+            try:
+                _checked(self._stimulator.disarm(get_response=True), "disarm")
+            except Exception:
+                print("WARNING: stimulator disarm was NOT confirmed. Check the device physically.")
+                raise
+
+    def close(self):
+        """Attempt disarm and disconnect independently; never hide cleanup errors."""
+        try:
+            self.disarm()
+        except Exception as error:
+            print(f"WARNING: disarm during cleanup failed: {error}")
+        finally:
+            if self._stimulator is not None:
+                try:
+                    self._stimulator.disconnect()
+                except Exception as error:
+                    print(f"WARNING: stimulator disconnect failed: {error}")
+
     def __enter__(self):
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # magicpy doesn't expose an explicit disconnect, but if it did
-        # we would call it here.
-        pass
+        self.close()

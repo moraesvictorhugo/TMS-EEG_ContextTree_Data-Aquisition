@@ -25,6 +25,7 @@ INTENSITY_MAP = {
 }
 
 # ─── Sequence generation ─────────────────────────────────────────────
+SEQUENCE_ALGORITHM = "context tree"  # "context tree" or "pseudo-random"
 ALPHABET = [0, 1, 2]          # possible stimulus types
 NUMBER_OF_STIMULI = 400       # total number of trials
 

@@ -2,7 +2,7 @@
 TMS-EEG ContextTree Data Acquisition — experiment entry point.
 
 This script orchestrates the full experiment:
-  1. Generate a context-tree stimulus sequence
+  1. Generate a stimulus sequence using the configured algorithm
   2. Connect to neuronavigation, stimulator, and trigger board
   3. Run the experiment loop with pause/resume support
 """
@@ -12,7 +12,12 @@ import traceback
 from collections import deque
 import keyboard
 from tms_eeg import config
-from tms_eeg.sequence import generate_sequence, print_sequence_stats, export_sequence
+from tms_eeg.sequence import (
+    generate_sequence,
+    generate_pseudo_random_sequence,
+    print_sequence_stats,
+    export_sequence,
+)
 from tms_eeg.hardware.stimulator import StimulatorController
 from tms_eeg.hardware.trigger import TriggerSender
 from tms_eeg.navigation.tracker import NavigationTracker
@@ -141,7 +146,18 @@ def main():
     """Set up all subsystems and run the experiment."""
 
     # 1. Sequence generation
-    sequence = generate_sequence(config.NUMBER_OF_STIMULI, config.ALPHABET)
+    if config.SEQUENCE_ALGORITHM == "context tree":
+        sequence = generate_sequence(config.NUMBER_OF_STIMULI, config.ALPHABET)
+    elif config.SEQUENCE_ALGORITHM == "pseudo-random":
+        sequence = generate_pseudo_random_sequence(
+            config.NUMBER_OF_STIMULI, config.ALPHABET
+        )
+    else:
+        raise ValueError(
+            f"Unknown SEQUENCE_ALGORITHM: {config.SEQUENCE_ALGORITHM!r}. "
+            "Expected 'context tree' or 'pseudo-random'."
+        )
+    print(f"Sequence algorithm: {config.SEQUENCE_ALGORITHM}")
     print_sequence_stats(sequence)
 
     if config.EXPORT_SEQUENCE_TXT:
@@ -149,6 +165,7 @@ def main():
             sequence,
             config.NUMBER_OF_STIMULI,
             config.VOLUNTEER_CODE,
+            algorithm=config.SEQUENCE_ALGORITHM,
         )
 
     # 2. Connect neuronavigation

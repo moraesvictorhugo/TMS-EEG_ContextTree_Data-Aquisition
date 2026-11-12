@@ -1,5 +1,5 @@
 """
-Context-tree sequence generation for the TMS-EEG experiment.
+Context-tree and pseudo-random sequence generation for the TMS-EEG experiment.
 
 The sequence follows a deterministic tree with probabilistic branching:
   - After symbol 2 → always 1
@@ -95,6 +95,52 @@ def generate_sequence(n_stimuli, alphabet=None):
     return sequence
 
 
+def generate_pseudo_random_sequence(n_stimuli, alphabet=None):
+    """Generate a sequence without consecutive repetitions.
+
+    Each symbol is chosen uniformly from the alphabet, excluding the previous
+    symbol. Counts are not required to be balanced across stimulus types.
+
+    Parameters
+    ----------
+    n_stimuli : int
+        Non-negative number of stimuli to generate.
+    alphabet : list[int], optional
+        Distinct stimulus symbols. Defaults to [0, 1, 2]. At least two
+        symbols are needed when requesting more than one stimulus.
+
+    Returns
+    -------
+    list[int]
+        The generated sequence of length *n_stimuli*.
+
+    Raises
+    ------
+    ValueError
+        If the count is negative or the alphabet cannot satisfy the rules.
+    """
+    if alphabet is None:
+        alphabet = [0, 1, 2]
+
+    if n_stimuli < 0:
+        raise ValueError("n_stimuli must be non-negative.")
+    if not alphabet:
+        raise ValueError("alphabet must not be empty.")
+    if len(set(alphabet)) != len(alphabet):
+        raise ValueError("alphabet must contain distinct symbols.")
+    if n_stimuli > 1 and len(alphabet) < 2:
+        raise ValueError("At least two symbols are needed to avoid repetitions.")
+    if n_stimuli == 0:
+        return []
+
+    sequence = [random.choice(alphabet)]
+    for _ in range(n_stimuli - 1):
+        candidates = [symbol for symbol in alphabet if symbol != sequence[-1]]
+        sequence.append(random.choice(candidates))
+
+    return sequence
+
+
 def print_sequence_stats(sequence):
     """Print the distribution of symbols in the sequence.
 
@@ -108,7 +154,9 @@ def print_sequence_stats(sequence):
     print("Count per type:\n", counts)
 
 
-def export_sequence(sequence, n_stimuli, volunteer_code, output_dir="."):
+def export_sequence(
+    sequence, n_stimuli, volunteer_code, output_dir=".", algorithm="context tree"
+):
     """Save the sequence to a text file.
 
     Parameters
@@ -121,9 +169,18 @@ def export_sequence(sequence, n_stimuli, volunteer_code, output_dir="."):
         Volunteer identifier (used in filename).
     output_dir : str, optional
         Directory to save the file in. Defaults to current directory.
+    algorithm : str, optional
+        "context tree" (default) or "pseudo-random", used in the filename.
     """
+    if algorithm == "context tree":
+        prefix = "tree_sequence"
+    elif algorithm == "pseudo-random":
+        prefix = "pseudo_random_sequence"
+    else:
+        raise ValueError(f"Unknown sequence algorithm: {algorithm!r}")
+
     filename = (
-        f"{output_dir}/tree_sequence_{n_stimuli}_trials_{volunteer_code}.txt"
+        f"{output_dir}/{prefix}_{n_stimuli}_trials_{volunteer_code}.txt"
     )
     np.savetxt(filename, sequence, delimiter=",", fmt="%d")
     print(f"Sequence exported to {filename}")

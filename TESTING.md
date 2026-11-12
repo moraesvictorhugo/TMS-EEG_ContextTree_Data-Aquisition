@@ -4,7 +4,9 @@ This project uses [pytest](https://docs.pytest.org/) to run automated tests and 
 
 ## What is tested?
 
-The tests focus on the **context-tree sequence generator** — the only part of the code that can be verified without the physical lab equipment. They check:
+The tests cover both sequence generators, text export and startup algorithm
+selection. Startup tests mock all hardware, keyboard interaction and experiment
+execution, so they do not connect equipment or fire pulses. They check:
 
 | Test | What it verifies |
 |---|---|
@@ -12,6 +14,11 @@ The tests focus on the **context-tree sequence generator** — the only part of 
 | Sequence length | Output has exactly the requested number of stimuli |
 | Valid symbols | Every element is `0`, `1`, or `2` |
 | Distribution | All three symbols appear in a large sequence |
+| Pseudo-random transitions | No consecutive symbols are equal; two symbols alternate |
+| Input validation | Empty/duplicate alphabets, insufficient symbols and negative counts fail |
+| Text export | Both filename prefixes and numeric content; legacy calls remain valid |
+| Startup selection | Both algorithms are selected correctly, with optional export |
+| Invalid configuration | Unknown algorithms and invalid pseudo-random inputs fail before hardware |
 
 The hardware modules (stimulator, ESP32 trigger, neuronavigation) require the physical equipment and are verified manually in the lab.
 
@@ -41,16 +48,8 @@ This creates a `.venv/` virtual environment and installs all dependencies listed
 uv run pytest
 ```
 
-You should see output like:
-
-```
-======================== test session starts ========================
-collected 9 items
-
-tests/test_sequence.py .........                              [100%]
-
-========================= 9 passed =================================
-```
+All tests should pass. The total includes the existing context-tree tests and
+parameterized cases for pseudo-random generation, export and startup selection.
 
 ### 4. Run with more detail (optional)
 

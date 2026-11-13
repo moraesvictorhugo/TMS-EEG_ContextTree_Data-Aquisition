@@ -47,6 +47,7 @@ PULSE_MAP = {
 SEQUENCE_ALGORITHM = "context tree"  # "context tree" or "pseudo-random"
 ALPHABET = [0, 1, 2]          # possible stimulus types
 NUMBER_OF_STIMULI = 400       # total number of trials
+NUMBER_OF_BLOCKS = 1          # equal blocks; total must be divisible; G resumes
 
 # ─── Timing ──────────────────────────────────────────────────────────
 ITI = (1, 3)                  # inter-trial interval range in seconds

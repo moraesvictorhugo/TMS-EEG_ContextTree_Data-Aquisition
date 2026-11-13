@@ -42,12 +42,23 @@ def wait_for_key(key, prompt):
             break
 
 
+def trials_per_block(total):
+    """Return equal block size; reject implicit rounding or empty blocks."""
+    blocks = config.NUMBER_OF_BLOCKS
+    if type(blocks) is not int or blocks <= 0:
+        raise ValueError("NUMBER_OF_BLOCKS must be a positive integer.")
+    if blocks > total or total % blocks:
+        raise ValueError("Trials must be divisible by NUMBER_OF_BLOCKS, with at least one trial per block.")
+    return total // blocks
+
+
 def validate_settings(sequence=None):
     """Check basic acquisition settings before opening any connections."""
     for name in ("NUMBER_OF_STIMULI", "TARGET_HISTORY_SIZE"):
         value = getattr(config, name)
         if type(value) is not int or value <= 0:
             raise ValueError(f"{name} must be a positive integer.")
+    trials_per_block(config.NUMBER_OF_STIMULI)
     if not isinstance(config.ITI, (tuple, list)) or len(config.ITI) != 2:
         raise ValueError("ITI must contain two finite, non-negative values.")
     if any(isinstance(v, bool) or not isinstance(v, Real) or
@@ -55,6 +66,7 @@ def validate_settings(sequence=None):
         raise ValueError("ITI must be finite, non-negative and ordered.")
     if sequence is None:
         return
+    trials_per_block(len(sequence))
     for symbol in sequence:
         if type(symbol) is not int or not 0 <= symbol <= 14:
             raise ValueError("Sequence symbols must be integers 0–14 (EEG codes 1–15).")
@@ -78,7 +90,7 @@ def run_experiment(sequence, tracker, stimulator, trigger):
     """Execute the main experiment loop.
 
     Fires TMS pulses according to *sequence*, gated by neuronavigation
-    target tracking.  Supports pause (B key) and resume (G key).
+    target tracking. Supports manual/block pause and resume (G key).
 
     Parameters
     ----------
@@ -101,6 +113,10 @@ def run_experiment(sequence, tracker, stimulator, trigger):
     preparation_failures = 0
     disarm_blocked = False
     retry_key_was_pressed = False
+    block_size = trials_per_block(len(sequence))
+    last_block_boundary = 0
+    block_pause = False
+    block_resume_released = False
 
     while True:
         # ── safety bounds check ───────────────────────────────────────
@@ -108,7 +124,26 @@ def run_experiment(sequence, tracker, stimulator, trigger):
             log(f"Safety bounds check: pulse_index ({pulse_index}) >= sequence length ({len(sequence)}). Breaking loop.", "DEBUG")
             break
 
-        # A target-loss disarm failure preserves this event in memory. Only
+        # Handle each internal boundary once, outside the previous event's
+        # error handler. Never regenerate/slice the sequence or reset its index.
+        if pulse_index and pulse_index % block_size == 0 and pulse_index != last_block_boundary:
+            last_block_boundary = pulse_index
+            paused = True
+            block_pause = True
+            block_resume_released = False
+            target_history.clear()
+            target_history.extend([False] * config.TARGET_HISTORY_SIZE)
+            print(f"Block {pulse_index // block_size}/{config.NUMBER_OF_BLOCKS} complete "
+                  f"({pulse_index}/{len(sequence)} trials). Press G to start the next block.")
+            try:
+                stimulator.disarm()
+            except Exception as error:
+                disarm_blocked = True
+                retry_key_was_pressed = False
+                print(f"Disarm NOT confirmed at block boundary: {error}. "
+                      "Firing blocked; check device and press R to retry, then G to resume.")
+
+        # A target-loss/block disarm failure preserves this event in memory. Only
         # an explicit R press may retry disarm; G/target recovery cannot bypass it.
         if disarm_blocked:
             retry_pressed = keyboard.is_pressed("r")
@@ -121,7 +156,10 @@ def run_experiment(sequence, tracker, stimulator, trigger):
                     disarm_blocked = False
                     target_history.clear()
                     target_history.extend([False] * config.TARGET_HISTORY_SIZE)
-                    print(f"Disarm confirmed. Waiting for target at event {pulse_index + 1}.")
+                    if block_pause:
+                        print("Disarm confirmed. Block pause remains active; press G to resume.")
+                    else:
+                        print(f"Disarm confirmed. Waiting for target at event {pulse_index + 1}.")
             retry_key_was_pressed = retry_pressed
             time.sleep(0.05)
             continue
@@ -132,8 +170,12 @@ def run_experiment(sequence, tracker, stimulator, trigger):
             paused = True
             log("Paused sequence (key B).", "INFO")
             print("Paused sequence (key B).")
-        if keyboard.is_pressed("g") and paused:
+        resume_pressed = keyboard.is_pressed("g")
+        if block_pause and not resume_pressed:
+            block_resume_released = True
+        if resume_pressed and paused and (not block_pause or block_resume_released):
             paused = False
+            block_pause = False
             target_history.clear()
             target_history.extend([False] * config.TARGET_HISTORY_SIZE)
             log("Sequence resumed (key G).", "INFO")

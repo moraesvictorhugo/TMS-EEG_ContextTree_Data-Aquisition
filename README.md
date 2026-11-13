@@ -73,6 +73,32 @@ Different symbols imply different intensities only when their mapped values diff
 With `EXPORT_SEQUENCE_TXT = True`, context-tree filenames retain the existing
 `tree_sequence_...` prefix; pseudo-random filenames use `pseudo_random_sequence_...`.
 
+## Experiment blocks
+
+In the **Sequence generation** config section, set:
+
+```python
+NUMBER_OF_STIMULI = 400  # total trials, not trials per block
+NUMBER_OF_BLOCKS = 2    # 2 equal blocks of 200; default 1 disables block pauses
+```
+
+Any positive number of equal, nonempty blocks is allowed. The total must be
+divisible by the block count; invalid settings fail before equipment connections.
+The full sequence is generated/exported once. Block boundaries do not reset
+context-tree history, pseudo-random order or the global event index. Paired
+events still count as one trial each.
+
+After each internal boundary (including the last trial's normal ITI), the
+stimulator is disarmed and the session waits indefinitely for **G**. Release
+G and press it again if already held. Resume requires reacquiring target history
+and preparing the next event. There is no programmed rest duration and no pause
+after the final block. B/G manual pause and target-loss waiting remain available.
+
+If block-boundary disarm is not confirmed, firing is blocked: **R** retries the
+disarm; once confirmed, **G is still required** to start the next block. Ctrl+C
+exits through normal cleanup. Rest periods emit no extra EEG codes. Continuity
+is in memory only, not a restart/recovery mechanism after exiting Python.
+
 ## Simple and paired-pulse protocol
 
 The default `MODE = "intensity"` retains the original intensity mapping and

@@ -31,6 +31,8 @@ execution, so they do not connect equipment or fire pulses. They check:
 | Uncertain delivery | Fire/EEG errors stop without repeating an attempted event |
 | Pause/target loss | Disarm before waiting; resume reacquires target history |
 | Target continuity | Prolonged/repeated losses and losses between events preserve order/index in both modes |
+| Blocks | One block preserves behavior; 400/2, 12/3 and one-trial blocks preserve event order in both modes |
+| Block rest | No preparation/fire while waiting; failed disarm requires R followed by G; invalid divisions fail before connections |
 | Target-loss disarm block | R retries once per press; holding R, G and target recovery cannot bypass block; Ctrl+C exits |
 | Cleanup | Partial startup, operator wait, Ctrl+C and normal exit release resources independently |
 | Cleanup failures | Warnings visible with logging disabled; original exception preserved |

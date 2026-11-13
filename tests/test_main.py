@@ -9,6 +9,7 @@ from tms_eeg import main as experiment
 
 @pytest.fixture
 def startup_mocks(monkeypatch):
+    monkeypatch.setattr(experiment.config, "NUMBER_OF_BLOCKS", 1)
     monkeypatch.setattr(experiment.config, "MODE", "intensity")
     names = (
         "generate_sequence",
@@ -124,6 +125,7 @@ def test_actual_tree_output_profiles_validated(monkeypatch, startup_mocks):
 
 @pytest.fixture
 def loop_mocks(monkeypatch):
+    monkeypatch.setattr(experiment.config, "NUMBER_OF_BLOCKS", 1)
     monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 1)
     monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: False)
     monkeypatch.setattr(experiment.time, "sleep", Mock())

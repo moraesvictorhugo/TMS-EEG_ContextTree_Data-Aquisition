@@ -180,11 +180,27 @@ class StimulatorController:
 
     # ── context manager ───────────────────────────────────────────────
     def disarm(self):
-        """Invalidate preparation and require acknowledgement of disable command."""
+        """Require disable acknowledgement or a fresh, successful disabled readback."""
         self._prepared = False
         if self._stimulator is not None:
             try:
-                _checked(self._stimulator.disarm(get_response=True), "disarm")
+                result = self._stimulator.disarm(get_response=True)
+                try:
+                    _checked(result, "disarm")
+                except RuntimeError as command_error:
+                    # MagicPy 0.1.6 assumes an 8-byte disable reply. X100
+                    # replies may contain multiple messages, and disabling an
+                    # already disabled device may return Empty. Never accept
+                    # those error payloads as proof: query the device afresh.
+                    try:
+                        status = _checked(self._stimulator.get_status(), "get_status after disarm")
+                        if not isinstance(status, dict) or status.get("Status") != "Disabled":
+                            raise RuntimeError(f"Disabled state not confirmed: {status!r}")
+                    except Exception as status_error:
+                        raise RuntimeError(
+                            f"{command_error}; independent status check failed: {status_error}"
+                        ) from status_error
+                    log("Disarm confirmed by independent Disabled status readback.", "INFO")
             except Exception:
                 print("WARNING: stimulator disarm was NOT confirmed. Check the device physically.")
                 raise

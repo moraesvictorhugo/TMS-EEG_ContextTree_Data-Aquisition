@@ -35,18 +35,18 @@ PULSE_MAP = {
     0: {"label": "single", "type": "single", "a_intensity": INTENSITY_2},
     1: {
         "label": "paired_1", "type": "paired",
-        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 8.0,
+        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 2.0,
     },
     2: {
         "label": "paired_2", "type": "paired",
-        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 2.5,
+        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 2.0,
     },
 }
 
 # ─── Sequence generation ─────────────────────────────────────────────
-SEQUENCE_ALGORITHM = "context tree"  # "context tree", "pseudo-random" or "constant"
-ALPHABET = [0, 1, 2]          # possible stimulus types; constant requires one, e.g. [2]
-NUMBER_OF_STIMULI = 400       # total number of trials
+SEQUENCE_ALGORITHM = "constant"  # "context tree", "pseudo-random" or "constant"
+ALPHABET = [1]          # possible stimulus types; constant requires one, e.g. [2]
+NUMBER_OF_STIMULI = 100       # total number of trials
 NUMBER_OF_BLOCKS = 1          # equal blocks; total must be divisible; G resumes
 
 # ─── Timing ──────────────────────────────────────────────────────────
@@ -77,4 +77,4 @@ ESP32_BAUD_RATE = 115200
 ESP32_STARTUP_DELAY = 2       # seconds to wait for ESP32 reboot after serial open
 
 # ─── Debug and Logging ───────────────────────────────────────────────
-ENABLE_LOGGING = True         # Toggle to enable verbose print statements
+ENABLE_LOGGING = False         # Toggle to enable verbose print statements

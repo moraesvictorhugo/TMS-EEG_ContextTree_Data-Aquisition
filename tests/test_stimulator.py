@@ -20,7 +20,7 @@ def controller(monkeypatch):
         {"Mode": "Dual", "Waveform": "Biphasic", "CurrentDirection": "Normal"}, 0
     )
     device.get_mode.return_value = ("Dual", 0)
-    device.get_ipi.return_value = (2.5, 0)
+    device.get_ipi.return_value = (config.PULSE_MAP[2]["ipi_ms"], 0)
     return controller
 
 
@@ -30,7 +30,7 @@ def test_paired_preparation_and_single_fire(controller):
     device = controller._stimulator
     device.set_mode.assert_called_once_with(
         mode="Dual", current_dir="Normal", n_pulses_per_burst=2,
-        ipi=2.5, baratio=1, get_response=True,
+        ipi=profile["ipi_ms"], baratio=1, get_response=True,
     )
     device.set_amplitude.assert_called_once_with(
         profile["a_intensity"], b_amp=profile["b_intensity"], get_response=True
@@ -198,3 +198,48 @@ def test_close_disconnects_even_after_failed_disarm(controller, monkeypatch, cap
 
 def test_close_before_connection():
     module.StimulatorController("unused").close()
+
+
+@pytest.mark.parametrize("reply", ["Empty", [
+    {"Status": "Disabled", "amplitudePercentage_A": 10},
+    {"Status": "Disabled", "Temperature": 24},
+]])
+def test_disarm_error_recovers_only_with_fresh_disabled_status(controller, reply):
+    controller._prepared = True
+    device = controller._stimulator
+    device.disarm.return_value = (reply, 1)
+    device.get_status.return_value = ({"Status": "Disabled"}, 0)
+
+    controller.disarm()
+
+    assert not controller._prepared
+    assert device.mock_calls == [call.disarm(get_response=True), call.get_status()]
+    with pytest.raises(RuntimeError, match="prepared"):
+        controller.fire()
+    device.fire.assert_not_called()
+
+
+@pytest.mark.parametrize("readback", [
+    ({"Status": "Enabled"}, 0),
+    ({"Status": "Disabled"}, 1),
+    ("Empty", 1),
+    ({}, 0),
+    ([{"Status": "Disabled"}], 0),
+])
+def test_disarm_error_remains_blocked_without_valid_readback(controller, readback):
+    controller._prepared = True
+    device = controller._stimulator
+    device.disarm.return_value = ([{"Status": "Disabled"}], 1)
+    device.get_status.return_value = readback
+
+    with pytest.raises(RuntimeError, match="independent status check failed"):
+        controller.disarm()
+
+    assert not controller._prepared
+    device.fire.assert_not_called()
+
+
+def test_acknowledged_disarm_needs_no_fallback(controller):
+    controller._stimulator.disarm.return_value = ({"Status": "Disabled"}, 0)
+    controller.disarm()
+    controller._stimulator.get_status.assert_not_called()

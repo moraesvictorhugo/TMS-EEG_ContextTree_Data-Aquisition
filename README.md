@@ -212,6 +212,10 @@ onset-to-onset trial interval.
   If disarm after target loss is not confirmed, the session stays open but firing
   is blocked. Check the device and press **R** to retry disarm once; release and
   press again if needed. G or target recovery alone cannot bypass this block.
+  MagicPy 0.1.6 can report a reply-length error on disable, or `Empty` when
+  already disabled. On a command error, the controller issues a fresh status
+  query and accepts recovery only with error code zero and `Status: Disabled`.
+  Error payloads containing `Disabled` alone do not release the block.
   Confirmed disarm returns to the normal target gate at the same event. Ctrl+C
   still exits. This is in-process continuity, not recovery after restarting Python.
 - Normal exit, Ctrl+C, startup failures and operator-wait interruptions attempt

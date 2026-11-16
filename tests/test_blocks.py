@@ -7,15 +7,17 @@ import pytest
 from tms_eeg import main as experiment
 
 
+@pytest.mark.parametrize("constant", [False, True])
 @pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
 @pytest.mark.parametrize("total, blocks", [(4, 1), (400, 2), (12, 3), (4, 4)])
-def test_block_pauses_preserve_sequence(monkeypatch, mode, total, blocks):
+def test_block_pauses_preserve_sequence(monkeypatch, mode, total, blocks, constant):
     monkeypatch.setattr(experiment.config, "MODE", mode)
     monkeypatch.setattr(experiment.config, "NUMBER_OF_BLOCKS", blocks)
     monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 3)
     tracker = Mock(all_target_status=True, status_lock=Lock())
     stimulator, trigger = Mock(), Mock()
-    sequence = [i % 3 for i in range(total)]
+    sequence = (experiment.generate_constant_sequence(total, [2]) if constant
+                else [i % 3 for i in range(total)])
     original = sequence.copy()
     boundary_polls = {}
     def key(key):

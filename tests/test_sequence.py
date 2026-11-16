@@ -178,3 +178,29 @@ class TestExportSequence:
         with pytest.raises(ValueError, match="Unknown sequence algorithm"):
             export_sequence([0, 1], 2, "V00", tmp_path, algorithm="invalid")
         assert list(tmp_path.iterdir()) == []
+
+
+class TestConstantSequence:
+    @pytest.mark.parametrize("count", [0, 1, 2, 100, 400])
+    def test_repeats_selected_symbol(self, count):
+        from tms_eeg.sequence import generate_constant_sequence
+        alphabet = [2]
+        assert generate_constant_sequence(count, alphabet) == [2] * count
+        assert alphabet == [2]
+
+    @pytest.mark.parametrize("count, alphabet", [
+        (-1, [2]), (True, [2]), (1.5, [2]), (100, None), (100, []),
+        (100, [0, 1]), (100, [2, 2]), (100, [True]), (100, [2.0]),
+        (100, [-1]), (100, [15]),
+    ])
+    def test_invalid_inputs(self, count, alphabet):
+        from tms_eeg.sequence import generate_constant_sequence
+        with pytest.raises(ValueError):
+            generate_constant_sequence(count, alphabet)
+
+    def test_constant_export(self, tmp_path):
+        from tms_eeg.sequence import generate_constant_sequence
+        export_sequence(generate_constant_sequence(100, [2]), 100, "V00", tmp_path,
+                        algorithm="constant")
+        output = tmp_path / "constant_sequence_100_trials_V00.txt"
+        assert output.read_text() == "2\n" * 100

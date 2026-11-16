@@ -11,6 +11,7 @@ execution, so they do not connect equipment or fire pulses. They check:
 | Test | What it verifies |
 |---|---|
 | Symbol transitions | After `2` → always `1`; after `(1,1)` → `0`; etc. |
+| Constant condition | One-symbol repetition, invalid inputs, startup/export, 100 equal events and triggers, both modes and block pauses |
 | Sequence length | Output has exactly the requested number of stimuli |
 | Valid symbols | Every element is `0`, `1`, or `2` |
 | Distribution | All three symbols appear in a large sequence |

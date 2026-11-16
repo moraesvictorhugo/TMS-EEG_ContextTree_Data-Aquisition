@@ -44,8 +44,8 @@ PULSE_MAP = {
 }
 
 # ─── Sequence generation ─────────────────────────────────────────────
-SEQUENCE_ALGORITHM = "context tree"  # "context tree" or "pseudo-random"
-ALPHABET = [0, 1, 2]          # possible stimulus types
+SEQUENCE_ALGORITHM = "context tree"  # "context tree", "pseudo-random" or "constant"
+ALPHABET = [0, 1, 2]          # possible stimulus types; constant requires one, e.g. [2]
 NUMBER_OF_STIMULI = 400       # total number of trials
 NUMBER_OF_BLOCKS = 1          # equal blocks; total must be divisible; G resumes
 

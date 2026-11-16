@@ -1,5 +1,5 @@
 """
-Context-tree and pseudo-random sequence generation for the TMS-EEG experiment.
+Context-tree, pseudo-random and constant sequence generation for the TMS-EEG experiment.
 
 The sequence follows a deterministic tree with probabilistic branching:
   - After symbol 2 → always 1
@@ -141,6 +141,23 @@ def generate_pseudo_random_sequence(n_stimuli, alphabet=None):
     return sequence
 
 
+def generate_constant_sequence(n_stimuli, alphabet=None):
+    """Repeat exactly one configured symbol, without random draws.
+
+    ``alphabet`` must contain one integer symbol in 0–14 (EEG codes 1–15).
+    The experiment validates the corresponding intensity/profile separately.
+    Zero stimuli are allowed here; experiment startup requires a positive count.
+    """
+    if type(n_stimuli) is not int or n_stimuli < 0:
+        raise ValueError("n_stimuli must be a non-negative integer.")
+    if not isinstance(alphabet, (list, tuple)) or len(alphabet) != 1:
+        raise ValueError("constant requires ALPHABET with exactly one symbol.")
+    symbol = alphabet[0]
+    if type(symbol) is not int or not 0 <= symbol <= 14:
+        raise ValueError("constant symbol must be an integer 0–14 (EEG codes 1–15).")
+    return [symbol] * n_stimuli
+
+
 def print_sequence_stats(sequence):
     """Print the distribution of symbols in the sequence.
 
@@ -170,12 +187,14 @@ def export_sequence(
     output_dir : str, optional
         Directory to save the file in. Defaults to current directory.
     algorithm : str, optional
-        "context tree" (default) or "pseudo-random", used in the filename.
+        "context tree" (default), "pseudo-random" or "constant", used in the filename.
     """
     if algorithm == "context tree":
         prefix = "tree_sequence"
     elif algorithm == "pseudo-random":
         prefix = "pseudo_random_sequence"
+    elif algorithm == "constant":
+        prefix = "constant_sequence"
     else:
         raise ValueError(f"Unknown sequence algorithm: {algorithm!r}")
 

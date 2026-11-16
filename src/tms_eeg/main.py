@@ -17,6 +17,7 @@ from tms_eeg import config
 from tms_eeg.sequence import (
     generate_sequence,
     generate_pseudo_random_sequence,
+    generate_constant_sequence,
     print_sequence_stats,
     export_sequence,
 )
@@ -292,10 +293,12 @@ def main():
         sequence = generate_pseudo_random_sequence(
             config.NUMBER_OF_STIMULI, config.ALPHABET
         )
+    elif config.SEQUENCE_ALGORITHM == "constant":
+        sequence = generate_constant_sequence(config.NUMBER_OF_STIMULI, config.ALPHABET)
     else:
         raise ValueError(
             f"Unknown SEQUENCE_ALGORITHM: {config.SEQUENCE_ALGORITHM!r}. "
-            "Expected 'context tree' or 'pseudo-random'."
+            "Expected 'context tree', 'pseudo-random' or 'constant'."
         )
     print(f"Sequence algorithm: {config.SEQUENCE_ALGORITHM}")
     validate_settings(sequence)

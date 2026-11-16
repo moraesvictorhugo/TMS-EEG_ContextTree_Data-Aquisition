@@ -46,7 +46,7 @@ Edit `src/tms_eeg/config.py` before each experiment session:
 - `VOLUNTEER_CODE` — volunteer identifier
 - `RMT_INTENSITY` — resting motor threshold (% MSO)
 - `NUMBER_OF_STIMULI` — total number of trials
-- `SEQUENCE_ALGORITHM` — `"context tree"` (default) or `"pseudo-random"`
+- `SEQUENCE_ALGORITHM` — `"context tree"` (default), `"pseudo-random"` or `"constant"`
 - `MAGVENTURE_PORT` / `ESP32_SERIAL_PORT` — serial port names
 
 ### Sequence generation
@@ -72,6 +72,35 @@ Different symbols imply different intensities only when their mapped values diff
 
 With `EXPORT_SEQUENCE_TXT = True`, context-tree filenames retain the existing
 `tree_sequence_...` prefix; pseudo-random filenames use `pseudo_random_sequence_...`.
+
+### Constant condition
+
+Use `constant` to repeat one condition without randomization:
+
+```python
+MODE = "intensity"
+SEQUENCE_ALGORITHM = "constant"
+ALPHABET = [2]
+NUMBER_OF_STIMULI = 100
+NUMBER_OF_BLOCKS = 1
+```
+
+This produces exactly 100 occurrences of symbol `2`, requesting the existing
+`INTENSITY_MAP[2]` (`int(1.2 * RMT_INTENSITY)` in integer % MSO) and EEG code `3`
+for every event. `ALPHABET` must contain exactly one integer symbol in `0–14`,
+with a valid intensity/profile mapping. Invalid settings fail before connections.
+For `MODE = "paired-pulse"`, the same algorithm repeats the selected `PULSE_MAP`
+profile: symbol `0` is the example simple profile, while `1`/`2` are paired profiles.
+
+Blocks, manual pause, target waiting and safety handling are unchanged. The
+sequence is generated once and optionally exported as `constant_sequence_...`.
+The default algorithm remains `context tree`; the pseudo-random no-repeat rule
+is unchanged and is intentionally not used for a constant condition.
+
+**Timing is unchanged:** `ITI` remains a post-event wait plus subsequent
+preparation/communication and possible target waits. Setting `ITI = (4, 6)`
+does not guarantee 4–6 seconds between physical pulses. No onset-to-onset
+scheduling or preparation-time optimization is included in this feature.
 
 ## Experiment blocks
 

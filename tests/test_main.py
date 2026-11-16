@@ -404,3 +404,44 @@ def test_basic_validation_before_connections(monkeypatch, startup_mocks, name, v
         experiment.main()
     startup_mocks["NavigationTracker"].assert_not_called()
     startup_mocks["StimulatorController"].assert_not_called()
+
+@pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
+@pytest.mark.parametrize("export_enabled", [False, True])
+def test_constant_startup(monkeypatch, startup_mocks, mode, export_enabled):
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", "constant")
+    monkeypatch.setattr(experiment.config, "ALPHABET", [2])
+    monkeypatch.setattr(experiment.config, "NUMBER_OF_STIMULI", 100)
+    monkeypatch.setattr(experiment.config, "EXPORT_SEQUENCE_TXT", export_enabled)
+    experiment.main()
+    startup_mocks["generate_sequence"].assert_not_called()
+    startup_mocks["generate_pseudo_random_sequence"].assert_not_called()
+    assert startup_mocks["run_experiment"].call_args.args[0] == [2] * 100
+    if export_enabled:
+        startup_mocks["export_sequence"].assert_called_once_with(
+            [2] * 100, 100, "V00", algorithm="constant")
+    else:
+        startup_mocks["export_sequence"].assert_not_called()
+
+
+@pytest.mark.parametrize("alphabet", [[], [0, 1], [2, 2], [True], [15]])
+def test_constant_invalid_before_connections(monkeypatch, startup_mocks, alphabet):
+    monkeypatch.setattr(experiment.config, "SEQUENCE_ALGORITHM", "constant")
+    monkeypatch.setattr(experiment.config, "ALPHABET", alphabet)
+    with pytest.raises(ValueError):
+        experiment.main()
+    startup_mocks["NavigationTracker"].assert_not_called()
+    startup_mocks["StimulatorController"].assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])
+def test_constant_loop_one_characteristic(monkeypatch, loop_mocks, mode):
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    tracker, stimulator, trigger = loop_mocks
+    sequence = experiment.generate_constant_sequence(100, [2])
+    experiment.run_experiment(sequence, tracker, stimulator, trigger)
+    assert stimulator.fire.call_count == 100
+    assert [c.args[0] for c in trigger.send.call_args_list] == [3] * 100
+    prepare = stimulator.prepare_pulse if mode == "intensity" else stimulator.prepare_stimulus
+    mapping = experiment.config.INTENSITY_MAP if mode == "intensity" else experiment.config.PULSE_MAP
+    assert [c.args[0] for c in prepare.call_args_list] == [mapping[2]] * 100

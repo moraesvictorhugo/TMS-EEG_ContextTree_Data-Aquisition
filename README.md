@@ -194,6 +194,24 @@ records/measurements to confirm delivery. Preparation adds response/readback tim
 in addition to the original waits; ITI remains the post-event wait, not a precise
 onset-to-onset trial interval.
 
+If `set_mode` or `set_waveform` returns a MagicPy error (including `Empty`),
+the paired controller requests fresh command-09 settings. Preparation continues
+only if the readback succeeds and matches the requested mode, current direction
+and IPI; waveform changes also require a matching waveform. Error payloads are
+never treated as confirmation. A failed or mismatched readback reports both the
+original command error and the independent check failure, without arming/firing.
+This distinguishes a missing set acknowledgement from settings the device did
+not apply; it does not establish Dual support on a particular device.
+
+In paired-pulse mode, an `arm` error also requires a fresh status query.
+Only a successful response with `Status: Enabled` allows preparation to
+continue. This handles a missing acknowledgement when enabling an already
+enabled device, without assuming its state from the previous event. Failed
+queries, error payloads and `Disabled` status still block firing. The existing
+amplitude, mode and IPI checks remain in place. `Enabled` is not proof of
+charge readiness or physical delivery. With `ENABLE_LOGGING = True`, recovery
+prints `Arm confirmed by independent Enabled status readback.`
+
 ## Testing
 
 ### Minimal safety layers (both modes)

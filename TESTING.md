@@ -26,6 +26,8 @@ execution, so they do not connect equipment or fire pulses. They check:
 | Generic paired conditions | Arbitrary SICI/LICI labels and preparation with 150/200 ms IPIs |
 | Long-interval readback | Real MagicPy decoder with synthetic Dual replies; mismatched values block firing without rounding |
 | Preparation failures | Communication/readback errors and stale preparation block firing |
+| Missing settings acknowledgement | Mode/waveform errors require a fresh matching settings query; wrong mode, direction, IPI, waveform or failed readback block arming/firing |
+| Missing arm acknowledgement | A fresh successful Enabled status is required; Disabled, malformed, failed or exceptional queries block preparation; repeated already-enabled events preserve fire/EEG counts without recovery disarms |
 | Protocol integration | Opt-in controller, invalid profiles before connections, both sequence algorithms |
 | Event loop | One fire/EEG code per event, legacy path preserved, preparation failure never fires |
 | Bounded recovery | Up to three preparation attempts; confirmed disarm required; counter resets after success |

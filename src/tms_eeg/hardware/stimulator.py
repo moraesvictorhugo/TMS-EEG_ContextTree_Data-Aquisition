@@ -127,6 +127,54 @@ class StimulatorController:
             log(f"Error in prepare_pulse:\n{traceback.format_exc()}", "ERROR")
             raise
 
+    def _checked_settings_command(self, result, operation, mode, ipi, waveform=None):
+        """Recover a missing set acknowledgement only from matching fresh settings."""
+        try:
+            return _checked(result, operation)
+        except RuntimeError as command_error:
+            try:
+                response = _checked(
+                    self._stimulator.get_pulse_settings(), f"readback after {operation}"
+                )
+                expected = {"Mode": mode, "CurrentDirection": "Normal"}
+                if waveform is not None:
+                    expected["Waveform"] = waveform
+                if (not isinstance(response, dict)
+                        or any(response.get(key) != value for key, value in expected.items())
+                        or ipi_ticks(response.get("IPIvalue")) != ipi_ticks(ipi)):
+                    raise RuntimeError(
+                        f"Requested settings not confirmed: expected {expected!r}, "
+                        f"IPI={ipi!r} ms; received {response!r}"
+                    )
+            except Exception as readback_error:
+                raise RuntimeError(
+                    f"{command_error}; independent settings check failed: {readback_error}"
+                ) from readback_error
+            log(f"{operation} confirmed by independent settings readback.", "INFO")
+            return response
+
+    def _arm_confirmed(self):
+        """Confirm enable, including a repeated arm with no acknowledgement.
+
+        Enabled is a device state, not a guarantee that the coil is charged
+        or that a subsequent fire command physically delivers a pulse.
+        """
+        try:
+            _checked(self._stimulator.arm(get_response=True), "arm")
+        except RuntimeError as command_error:
+            # Some devices do not send a new acknowledgement when already
+            # enabled. Do not infer that state from previous pulses or an
+            # error payload: ask the device again.
+            try:
+                status = _checked(self._stimulator.get_status(), "get_status after arm")
+                if not isinstance(status, dict) or status.get("Status") != "Enabled":
+                    raise RuntimeError(f"Enabled state not confirmed: {status!r}")
+            except Exception as status_error:
+                raise RuntimeError(
+                    f"{command_error}; independent arm status check failed: {status_error}"
+                ) from status_error
+            log("Arm confirmed by independent Enabled status readback.", "INFO")
+
     def prepare_stimulus(self, profile):
         """Prepare one Standard/Dual event; never synthesize A/B timing in Python."""
         self._prepared = False
@@ -140,9 +188,12 @@ class StimulatorController:
         settings = dict(current_dir="Normal", n_pulses_per_burst=2,
                         ipi=ipi, baratio=1, get_response=True)
         log(f"Preparing requested pulse profile: {profile}; waveform={self._waveform}", "INFO")
-        _checked(self._stimulator.set_mode(mode=mode, **settings), "set_mode")
-        response = _checked(
-            self._stimulator.set_waveform(self._waveform, **settings), "set_waveform"
+        self._checked_settings_command(
+            self._stimulator.set_mode(mode=mode, **settings), "set_mode", mode, ipi
+        )
+        response = self._checked_settings_command(
+            self._stimulator.set_waveform(self._waveform, **settings),
+            "set_waveform", mode, ipi, waveform=self._waveform,
         )
         if not isinstance(response, dict) or any(
             response.get(key) != expected
@@ -151,7 +202,7 @@ class StimulatorController:
         ):
             raise RuntimeError(f"Stimulator mode/waveform readback mismatch: {response!r}")
         time.sleep(1)
-        _checked(self._stimulator.arm(get_response=True), "arm")
+        self._arm_confirmed()
         time.sleep(1)
         _checked(self._stimulator.set_amplitude(
             profile["a_intensity"], b_amp=profile.get("b_intensity"), get_response=True

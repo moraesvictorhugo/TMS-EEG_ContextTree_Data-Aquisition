@@ -25,6 +25,19 @@ def ipi_ticks(ipi):
 class PairedPulseMagVenture(mp.MagVenture):
     """Encode 1–200 ms IPIs; device resolution is checked by the controller."""
 
+    def get_pulse_settings(self):
+        """Read the complete command-09 settings without changing device state.
+
+        Unlike get_waveform() in MagicPy 0.1.6, this does not reconnect the
+        serial port. Return the original response/error tuple for validation.
+        """
+        if self.flush_before_cmd:
+            self.flush_input()
+        return self.process_command(
+            "0B", ["09", "00"] + ["00"] * 9,
+            get_response=True, resp_len_exp=14,
+        )
+
     def parse_ipi(self, ipi):
         ticks = ipi_ticks(ipi)
         # Encode exact integer ticks, avoiding hexlm's float truncation.

@@ -1,8 +1,35 @@
 """Pure encoding tests: never instantiate a device or open a serial port."""
 import pytest
 import magicpy as mp
+from unittest.mock import Mock
 
 from tms_eeg.hardware.magicpy_adapter import PairedPulseMagVenture
+
+
+def test_settings_query_with_real_magicpy_decoder(monkeypatch):
+    # Synthetic reply for Dual, Normal, Biphasic, IPI index 250 = 2 ms.
+    frame = bytes([0xFE, 0x0B, 0x09, 0, 0, 3, 0, 1, 3, 250, 0, 80, 0, 0xFF])
+    device = object.__new__(PairedPulseMagVenture)
+    device.flush_before_cmd = True
+    device.flush_input = Mock()
+    device.sleep_short = 0
+    device.port = Mock()
+    device.port.read.return_value = frame
+    device.port.in_waiting = 0
+    monkeypatch.setattr("magicpy.magicpy.time.sleep", Mock())
+
+    response, error = device.get_pulse_settings()
+
+    assert error == 0
+    assert response["Mode"] == "Dual"
+    assert response["CurrentDirection"] == "Normal"
+    assert response["Waveform"] == "Biphasic"
+    assert response["IPIvalue"] == pytest.approx(2)
+    device.flush_input.assert_called_once_with()
+    device.port.read.assert_called_once_with(14)
+    command = device.port.write.call_args.args[0]
+    assert command[:4] == bytes([0xFE, 0x0B, 0x09, 0])
+    assert command[4:13] == bytes(9)
 
 
 @pytest.mark.parametrize("ipi", [1, 2.5, 8, 10, 10.1, 25.7, 100, 100.1, 110, 150, 200])

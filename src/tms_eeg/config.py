@@ -5,7 +5,7 @@ Edit the values below before each experiment session.
 """
 
 # ─── Experiment protocol ──────────────────────────────────────────────
-MODE = "intensity"            # "intensity" (legacy) or "paired-pulse"
+MODE = "paired-pulse"            # "intensity" (legacy) or "paired-pulse"
 VOLUNTEER_CODE = "V00"        # volunteer identifier
 EXPORT_SEQUENCE_TXT = False   # whether to save the generated sequence to a .txt file
 
@@ -35,7 +35,7 @@ PULSE_MAP = {
     0: {"label": "single", "type": "single", "a_intensity": INTENSITY_2},
     1: {
         "label": "paired_1", "type": "paired",
-        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 2.0,
+        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 10.0,
     },
     2: {
         "label": "paired_2", "type": "paired",
@@ -77,4 +77,4 @@ ESP32_BAUD_RATE = 115200
 ESP32_STARTUP_DELAY = 2       # seconds to wait for ESP32 reboot after serial open
 
 # ─── Debug and Logging ───────────────────────────────────────────────
-ENABLE_LOGGING = False         # Toggle to enable verbose print statements
+ENABLE_LOGGING = True         # Toggle to enable verbose print statements

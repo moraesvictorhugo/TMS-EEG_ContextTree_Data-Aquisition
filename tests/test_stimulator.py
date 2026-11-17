@@ -1,6 +1,7 @@
 """Controller and profile tests using mocks only; no equipment access."""
 from copy import deepcopy
 from unittest.mock import Mock, call
+from threading import Lock
 
 import pytest
 
@@ -21,6 +22,8 @@ def controller(monkeypatch):
     )
     device.get_mode.return_value = ("Dual", 0)
     device.get_ipi.return_value = (config.PULSE_MAP[2]["ipi_ms"], 0)
+    device.get_pulse_settings.return_value = ("Empty", 1)
+    device.get_status.return_value = ("Empty", 1)
     return controller
 
 
@@ -91,6 +94,141 @@ def test_failed_repreparation_invalidates_previous_event(controller):
         controller.prepare_stimulus({})
     with pytest.raises(RuntimeError):
         controller.fire()
+
+
+@pytest.mark.parametrize("operation", ["set_mode", "set_waveform"])
+def test_settings_ack_error_recovers_from_independent_readback(controller, operation):
+    profile = config.PULSE_MAP[1]
+    device = controller._stimulator
+    getattr(device, operation).return_value = ("Empty", 1)
+    device.get_pulse_settings.return_value = ({
+        "Mode": "Dual", "CurrentDirection": "Normal",
+        "Waveform": "Biphasic", "IPIvalue": profile["ipi_ms"],
+    }, 0)
+    device.get_ipi.return_value = (profile["ipi_ms"], 0)
+
+    controller.prepare_stimulus(profile)
+    device.get_pulse_settings.assert_called_once_with()
+    device.fire.assert_not_called()
+    controller.fire()
+    device.fire.assert_called_once_with()
+
+
+@pytest.mark.parametrize("operation", ["set_mode", "set_waveform"])
+@pytest.mark.parametrize("change, error", [
+    ({"Mode": "Standard"}, 0),
+    ({"CurrentDirection": "Reversed"}, 0),
+    ({"IPIvalue": 10}, 0),
+    ({"IPIvalue": None}, 0),
+    ({}, 1),
+])
+def test_settings_ack_error_blocks_on_readback_failure(controller, operation, change, error):
+    device = controller._stimulator
+    getattr(device, operation).return_value = ("Empty", 1)
+    status = {"Mode": "Dual", "CurrentDirection": "Normal",
+              "Waveform": "Biphasic", "IPIvalue": config.PULSE_MAP[1]["ipi_ms"]}
+    status.update(change)
+    device.get_pulse_settings.return_value = (status, error)
+
+    with pytest.raises(RuntimeError, match="independent settings check failed"):
+        controller.prepare_stimulus(config.PULSE_MAP[1])
+    device.arm.assert_not_called()
+    device.set_amplitude.assert_not_called()
+    with pytest.raises(RuntimeError, match="prepared"):
+        controller.fire()
+    device.fire.assert_not_called()
+
+
+def test_waveform_ack_error_rejects_wrong_waveform(controller):
+    device = controller._stimulator
+    device.set_waveform.return_value = ("Empty", 1)
+    device.get_pulse_settings.return_value = ({
+        "Mode": "Dual", "CurrentDirection": "Normal", "Waveform": "Monophasic",
+        "IPIvalue": config.PULSE_MAP[1]["ipi_ms"],
+    }, 0)
+    with pytest.raises(RuntimeError, match="Requested settings not confirmed"):
+        controller.prepare_stimulus(config.PULSE_MAP[1])
+    device.arm.assert_not_called()
+    device.fire.assert_not_called()
+
+
+@pytest.mark.parametrize("reply", ["Empty", [{"Status": "Enabled"}]])
+def test_arm_ack_error_requires_fresh_enabled_status(controller, reply):
+    device = controller._stimulator
+    device.arm.return_value = (reply, 1)
+    device.get_status.return_value = ({"Status": "Enabled"}, 0)
+    controller.prepare_stimulus(config.PULSE_MAP[2])
+    device.get_status.assert_called_once_with()
+    device.fire.assert_not_called()
+    controller.fire()
+    device.fire.assert_called_once_with()
+
+
+@pytest.mark.parametrize("readback", [
+    ({"Status": "Disabled"}, 0),
+    ({"Status": "Enabled"}, 1),
+    ("Empty", 1), ({}, 0), ([{"Status": "Enabled"}], 0),
+])
+def test_arm_ack_error_blocks_on_unconfirmed_status(controller, readback):
+    device = controller._stimulator
+    controller._prepared = True
+    device.arm.return_value = ([{"Status": "Enabled"}], 1)
+    device.get_status.return_value = readback
+    with pytest.raises(RuntimeError, match="independent arm status check failed"):
+        controller.prepare_stimulus(config.PULSE_MAP[2])
+    device.set_amplitude.assert_not_called()
+    with pytest.raises(RuntimeError, match="prepared"):
+        controller.fire()
+    device.fire.assert_not_called()
+
+
+def test_arm_readback_exception_preserves_original_error(controller):
+    device = controller._stimulator
+    device.arm.return_value = ("Empty", 1)
+    device.get_status.side_effect = OSError("serial read failed")
+    with pytest.raises(RuntimeError, match="MagicPy arm failed.*serial read failed"):
+        controller.prepare_stimulus(config.PULSE_MAP[2])
+    device.set_amplitude.assert_not_called()
+    device.fire.assert_not_called()
+
+
+def test_acknowledged_arm_needs_no_fallback(controller):
+    controller.prepare_stimulus(config.PULSE_MAP[2])
+    controller._stimulator.get_status.assert_not_called()
+
+
+def test_constant_paired_sequence_with_empty_ack_when_already_enabled(controller, monkeypatch):
+    from tms_eeg import main as experiment
+
+    monkeypatch.setattr(config, "MODE", "paired-pulse")
+    monkeypatch.setattr(config, "NUMBER_OF_BLOCKS", 1)
+    monkeypatch.setattr(config, "TARGET_HISTORY_SIZE", 1)
+    monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: False)
+    device = controller._stimulator
+    enabled = False
+
+    def arm(get_response):
+        nonlocal enabled
+        assert get_response is True
+        if enabled:
+            return "Empty", 1
+        enabled = True
+        return {"Status": "Enabled"}, 0
+
+    device.arm.side_effect = arm
+    device.get_status.side_effect = lambda: ({"Status": "Enabled" if enabled else "Disabled"}, 0)
+    device.get_ipi.return_value = (config.PULSE_MAP[1]["ipi_ms"], 0)
+    tracker = Mock(all_target_status=True, status_lock=Lock())
+    trigger = Mock()
+
+    experiment.run_experiment([1] * 5, tracker, controller, trigger)
+
+    assert device.arm.call_count == 5
+    assert device.get_status.call_count == 4
+    assert device.fire.call_count == 5
+    assert trigger.send.call_args_list == [call(2)] * 5
+    assert device.set_amplitude.call_count == 5
+    device.disarm.assert_not_called()
 
 
 def test_legacy_preparation_unchanged(monkeypatch):

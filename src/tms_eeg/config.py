@@ -1,36 +1,36 @@
-"""
-Experiment configuration — single source of truth for all parameters.
+"""Settings to review before each experiment session."""
 
-Edit the values below before each experiment session.
-"""
+# ─── Session and design ──────────────────────────────────────────────
+VOLUNTEER_CODE = "V00"
+MODE = "intensity"  # "intensity" or "paired-pulse"
+SEQUENCE_ALGORITHM = "context tree"  # "context tree", "pseudo-random", or "constant"
+# Context tree uses this for its first symbol. Pseudo-random uses it throughout.
+ALPHABET = [0, 1, 2]  # Constant requires one symbol.
+NUMBER_OF_STIMULI = 400  # Total trials. Each pair counts as one.
+NUMBER_OF_BLOCKS = 2  # Equal blocks. Trial count must divide evenly.
+ITI = (4, 6)  # Random start-to-start range (s). Pairs start at pulse A.
+EXPORT_SEQUENCE_TXT = False
 
-# ─── Experiment protocol ──────────────────────────────────────────────
-MODE = "intensity"            # "intensity" (legacy) or "paired-pulse"
-VOLUNTEER_CODE = "V00"        # volunteer identifier
-EXPORT_SEQUENCE_TXT = False   # whether to save the generated sequence to a .txt file
+# ─── Motor threshold and intensities ─────────────────────────────────
+RMT_INTENSITY = 20  # Resting motor threshold (% MSO).
 
-# ─── Volunteer's motor threshold ──────────────────────────────────────
-RMT_INTENSITY = 20            # resting motor threshold (% MSO)
+# Derived from rMT in integer % MSO.
+INTENSITY_0 = int(0.8 * RMT_INTENSITY)
+INTENSITY_1 = int(RMT_INTENSITY)
+INTENSITY_2 = int(1.2 * RMT_INTENSITY)
 
-# Derived intensity levels (computed from RMT_INTENSITY)
-INTENSITY_0 = int(0.8 * RMT_INTENSITY)   # 80% rMT
-INTENSITY_1 = int(RMT_INTENSITY)         # 100% rMT
-INTENSITY_2 = int(1.2 * RMT_INTENSITY)   # 120% rMT
-
-# Map sequence symbols → intensity values (actual % MSO, not strings)
+# Symbol to intensity in "intensity" mode.
 INTENSITY_MAP = {
     0: INTENSITY_0,
     1: INTENSITY_1,
     2: INTENSITY_2,
 }
 
-# ─── Simple/paired protocol (used only with MODE = "paired-pulse") ────
-# EXAMPLE settings, not a validated experimental prescription. Intensities
-# are integer % MSO. Confirm device/firmware Dual support and measure A/B timing.
-# A = conditioning pulse, B = test pulse. IPI is onset A to onset B in ms.
-# Labels are arbitrary: e.g. rename paired_1/paired_2 to SICI/LICI. They do not
-# select a protocol automatically. Software IPI range: 1–200 ms; verify readback.
-PULSE_WAVEFORM = "Biphasic"    # "Monophasic", "Biphasic" or "HalfSine"; no burst
+# ─── Pulse profiles ("paired-pulse" mode) ─────────────────────────────
+PULSE_WAVEFORM = "Biphasic"  # "Monophasic", "Biphasic", or "HalfSine".
+# Example profiles. Confirm Dual support, readback, and pulse timing.
+# A is the conditioning pulse, B the test pulse. IPI is A-to-B onset (ms).
+# Amplitudes are integer % MSO. Labels are descriptive.
 PULSE_MAP = {
     0: {"label": "single", "type": "single", "a_intensity": INTENSITY_2},
     1: {
@@ -43,38 +43,24 @@ PULSE_MAP = {
     },
 }
 
-# ─── Sequence generation ─────────────────────────────────────────────
-SEQUENCE_ALGORITHM = "context tree"  # "context tree", "pseudo-random" or "constant"
-ALPHABET = [0, 1, 2]          # possible stimulus types; constant requires one, e.g. [2]
-NUMBER_OF_STIMULI = 400       # total number of trials
-NUMBER_OF_BLOCKS = 2          # equal blocks; total must be divisible; G resumes
-
-# ─── Timing ──────────────────────────────────────────────────────────
-ITI = (4, 6)                  # seconds between trial starts (single pulse or pulse A)
-
-# ─── Target tracking ─────────────────────────────────────────────────
-TARGET_HISTORY_SIZE = 50      # how many consecutive True statuses are needed
-                              # before firing a pulse
-
-# ─── Neuronavigation (InVesalius relay server) ────────────────────────
+# ─── Neuronavigation and targeting (InVesalius) ───────────────────────
 NAVIGATION_ADDRESS = "127.0.0.1"
 NAVIGATION_PORTS = [5000]
+TARGET_HISTORY_SIZE = 50  # Consecutive on-target checks before preparation.
 CREATE_NAVIGATION_MARKER = False
 
-# Publisher message topics expected from InVesalius
-PUB_MESSAGES = [
-    "Coil at target",
-    "Marker label",
-]
+# Topic order: target status, marker label.
+PUB_MESSAGES = ["Coil at target", "Marker label"]
 
-# ─── MagVenture stimulator ───────────────────────────────────────────
+# ─── Equipment communication ─────────────────────────────────────────
+# MagVenture
 MAGVENTURE_PORT = "COM1"
-MAGVENTURE_RESPONSE_DELAY = 0.05  # seconds before MagicPy reads a serial response
+MAGVENTURE_RESPONSE_DELAY = 0.05  # Delay before MagicPy reads a reply (s).
 
-# ─── ESP32 trigger ───────────────────────────────────────────────────
+# ESP32 trigger
 ESP32_SERIAL_PORT = "COM3"
 ESP32_BAUD_RATE = 115200
-ESP32_STARTUP_DELAY = 2       # seconds to wait for ESP32 reboot after serial open
+ESP32_STARTUP_DELAY = 2  # Reboot wait after opening the port (s).
 
-# ─── Debug and Logging ───────────────────────────────────────────────
-ENABLE_LOGGING = True         # Toggle to enable verbose print statements
+# ─── Diagnostics ─────────────────────────────────────────────────────
+ENABLE_LOGGING = True

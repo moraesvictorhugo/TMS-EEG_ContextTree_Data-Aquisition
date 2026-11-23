@@ -42,20 +42,29 @@ tests/
 
 ## Configuration
 
-Edit `src/tms_eeg/config.py` before each experiment session:
-- `VOLUNTEER_CODE` — volunteer identifier
-- `RMT_INTENSITY` — resting motor threshold (% MSO)
-- `NUMBER_OF_STIMULI` — total number of trials
-- `SEQUENCE_ALGORITHM` — `"context tree"` (default), `"pseudo-random"` or `"constant"`
-- `MAGVENTURE_PORT` / `ESP32_SERIAL_PORT` — serial port names
+Review `src/tms_eeg/config.py` before each session.
+
+- **Session and design** covers the volunteer code, mode, sequence, trial and
+  block counts, ITI, and sequence export.
+- **Motor threshold and intensities** defines the resting motor threshold
+  (`RMT_INTENSITY` in % MSO), the derived levels, and the map for `intensity`.
+- **Pulse profiles** defines the waveform and simple or paired profiles for
+  `paired-pulse`.
+- **Neuronavigation and targeting** covers the InVesalius connection, target
+  checks, and message topics.
+- **Equipment communication** covers the MagVenture and ESP32 serial settings.
+- **Diagnostics** controls verbose logging.
 
 ### Sequence generation
 
-In the existing **Sequence generation** section of the config, select:
+Set `SEQUENCE_ALGORITHM` in **Session and design**:
 
 ```python
 SEQUENCE_ALGORITHM = "pseudo-random"  # or "context tree" for the original behavior
 ```
+
+Context tree uses `ALPHABET` to choose the first symbol. Tree transitions can
+still produce any of the symbols `0`, `1`, and `2`.
 
 Pseudo-random generation chooses the first symbol uniformly from `ALPHABET`,
 then chooses uniformly among all symbols other than the previous one. For example,
@@ -111,7 +120,7 @@ and the result.
 
 ## Experiment blocks
 
-In the **Sequence generation** config section, set:
+Set the trial and block counts in **Session and design**:
 
 ```python
 NUMBER_OF_STIMULI = 400  # total trials, not trials per block

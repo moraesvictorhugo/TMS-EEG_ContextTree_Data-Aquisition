@@ -3,7 +3,8 @@ import pytest
 import magicpy as mp
 from unittest.mock import Mock
 
-from tms_eeg.hardware.magicpy_adapter import PairedPulseMagVenture
+from tms_eeg import config
+from tms_eeg.hardware.magicpy_adapter import MagVenture, PairedPulseMagVenture
 
 
 def test_settings_query_with_real_magicpy_decoder(monkeypatch):
@@ -30,6 +31,22 @@ def test_settings_query_with_real_magicpy_decoder(monkeypatch):
     command = device.port.write.call_args.args[0]
     assert command[:4] == bytes([0xFE, 0x0B, 0x09, 0])
     assert command[4:13] == bytes(9)
+
+
+def test_raw_status_diagnostics_record_short_reply_without_changing_result(monkeypatch, capsys):
+    monkeypatch.setattr(config, "ENABLE_LOGGING", True)
+    monkeypatch.setattr("magicpy.magicpy.time.sleep", Mock())
+    device = object.__new__(MagVenture)
+    device.sleep_short = 0
+    device.port = Mock(in_waiting=0)
+    read = device.port.read
+    read.return_value = b"\xfe\x01\xff"
+
+    assert device.get_status_set_get() == (None, 1)
+
+    assert device.port.read is read
+    read.assert_called_once_with(13)
+    assert "expected 13 bytes, received 3 bytes (short), result=NoneType, error=1" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("ipi", [1, 2.5, 8, 10, 10.1, 25.7, 100, 100.1, 110, 150, 200])

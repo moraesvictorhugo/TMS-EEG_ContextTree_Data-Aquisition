@@ -104,6 +104,10 @@ preparation and target checks pass. Late events start a new interval from their
 own fire command. Measure physical pulse-to-pulse timing in the acquisition.
 `MAGVENTURE_RESPONSE_DELAY` controls the pause before MagicPy reads a reply
 and defaults to 0.05 s. Validate serial timing on the connected equipment.
+With `ENABLE_LOGGING = True`, the log reports each preparation attempt's
+duration, the sampled ITI, the interval between fire commands and dispatch
+lateness. MagicPy replies report elapsed time, expected and received bytes,
+and the result.
 
 ## Experiment blocks
 
@@ -194,9 +198,11 @@ The ESP32 firmware is unchanged: one EEG code marks the condition/event, not
 individually synchronized A/B onsets. Existing software-trigger jitter remains.
 An exception during or after an attempted fire stops the sequence without
 repeating that event: delivery may be uncertain. Requested profiles are printed at startup and per event; use actual device
-records/measurements to confirm delivery. A fresh Enabled status can avoid a
-repeated arm command on successive paired-mode trials. The controller still
-checks settings and amplitude-command responses for every trial.
+records/measurements to confirm delivery. Both modes can reuse a repeated
+profile after a fresh settings and status readback confirms the requested
+parameters, amplitudes and Enabled state. A mismatch, unavailable readback,
+profile change or disarm requires full preparation. In paired mode, full
+preparation can avoid a repeated arm command when it confirms Enabled.
 
 If `set_mode` or `set_waveform` returns a MagicPy error (including `Empty`),
 the paired controller requests fresh command-09 settings. Preparation continues

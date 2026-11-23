@@ -141,7 +141,9 @@ def test_iti_includes_preparation_and_restarts_after_overrun(
 ):
     tracker, stimulator, trigger = loop_mocks
     monkeypatch.setattr(experiment.config, "MODE", mode)
-    monkeypatch.setattr(experiment.config, "ITI", (4, 4))
+    monkeypatch.setattr(experiment.config, "ITI", (4, 6))
+    draw = Mock(side_effect=[4, 4.5, 5.75])
+    monkeypatch.setattr(experiment.random, "uniform", draw)
     now = 0.0
     fired = []
     starts = []
@@ -163,7 +165,8 @@ def test_iti_includes_preparation_and_restarts_after_overrun(
 
     assert fired[1] - fired[0] == pytest.approx(4)
     assert fired[2] - fired[1] >= 5
-    assert fired[3] - fired[2] == pytest.approx(4)
+    assert fired[3] - fired[2] == pytest.approx(5.75)
+    assert [call.args for call in draw.call_args_list] == [(4, 6)] * 3
     if mode == "paired-pulse":
         assert starts[1] - fired[0] >= experiment.config.PULSE_MAP[1]["ipi_ms"] / 1000
     assert now - fired[-1] < 1

@@ -6,11 +6,11 @@ Edit the values below before each experiment session.
 
 # ─── Experiment protocol ──────────────────────────────────────────────
 MODE = "paired-pulse"            # "intensity" (legacy) or "paired-pulse"
-VOLUNTEER_CODE = "V23"        # volunteer identifier
+VOLUNTEER_CODE = "V00"        # volunteer identifier
 EXPORT_SEQUENCE_TXT = False   # whether to save the generated sequence to a .txt file
 
 # ─── Volunteer's motor threshold ──────────────────────────────────────
-RMT_INTENSITY = 40            # resting motor threshold (% MSO)
+RMT_INTENSITY = 20            # resting motor threshold (% MSO)
 
 # Derived intensity levels (computed from RMT_INTENSITY)
 INTENSITY_0 = int(0.8 * RMT_INTENSITY)   # 80% rMT
@@ -77,4 +77,4 @@ ESP32_BAUD_RATE = 115200
 ESP32_STARTUP_DELAY = 2       # seconds to wait for ESP32 reboot after serial open
 
 # ─── Debug and Logging ───────────────────────────────────────────────
-ENABLE_LOGGING = False         # Toggle to enable verbose print statements
+ENABLE_LOGGING = True         # Toggle to enable verbose print statements

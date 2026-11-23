@@ -125,6 +125,7 @@ def run_experiment(sequence, tracker, stimulator, trigger):
     block_resume_released = False
     prepared = False
     next_trial_at = None
+    last_fired_at = None
 
     while True:
         # ── safety bounds check ───────────────────────────────────────
@@ -211,13 +212,21 @@ def run_experiment(sequence, tracker, stimulator, trigger):
             profile = config.PULSE_MAP[stimulus] if paired_mode else None
             if not prepared:
                 log(f"Target tracking passed. Preparing to fire pulse {pulse_index + 1}.", "DEBUG")
-                if paired_mode:
-                    print(f"Pulse profile: {profile} (event {stimulus})")
-                    stimulator.prepare_stimulus(profile)
-                else:
-                    intensity = config.INTENSITY_MAP[stimulus]
-                    print(f"Intensity: {intensity} (event {stimulus})")
-                    stimulator.prepare_pulse(intensity)
+                started_at = time.monotonic()
+                try:
+                    if paired_mode:
+                        print(f"Pulse profile: {profile} (event {stimulus})")
+                        stimulator.prepare_stimulus(profile)
+                    else:
+                        intensity = config.INTENSITY_MAP[stimulus]
+                        print(f"Intensity: {intensity} (event {stimulus})")
+                        stimulator.prepare_pulse(intensity)
+                finally:
+                    log(
+                        f"Trial {pulse_index + 1} preparation attempt "
+                        f"{preparation_failures + 1}: {time.monotonic() - started_at:.3f} s",
+                        "DEBUG",
+                    )
                 prepared = True
                 log("Stimulator armed successfully.", "DEBUG")
 
@@ -259,10 +268,16 @@ def run_experiment(sequence, tracker, stimulator, trigger):
                 continue
 
             if next_trial_at is not None:
-                log(f"Trial dispatch lateness: {fired_at - next_trial_at:.3f} s", "DEBUG")
+                log(
+                    f"Trial {pulse_index + 1}: ITI drawn {next_trial_at - last_fired_at:.3f} s, "
+                    f"dispatch interval {fired_at - last_fired_at:.3f} s, "
+                    f"dispatch lateness {fired_at - next_trial_at:.3f} s",
+                    "DEBUG",
+                )
 
             # Start the next ITI from this actual command, including after an overrun.
             if pulse_index + 1 < len(sequence):
+                last_fired_at = fired_at
                 next_trial_at = fired_at + random.uniform(*config.ITI)
 
             if profile is not None and profile["type"] == "paired":

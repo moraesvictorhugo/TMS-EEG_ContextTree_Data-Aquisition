@@ -10,7 +10,10 @@ import traceback
 import magicpy as mp
 from tms_eeg import config
 from tms_eeg.logger import log
-from tms_eeg.hardware.magicpy_adapter import PairedPulseMagVenture, ipi_ticks
+from tms_eeg.hardware.magicpy_adapter import MagVenture, PairedPulseMagVenture, ipi_ticks
+
+
+NON_BURST_WAVEFORMS = ("Monophasic", "Biphasic", "HalfSine")
 
 
 def validate_profile(profile):
@@ -39,7 +42,7 @@ def validate_protocol(mode, alphabet, pulse_map, waveform):
         raise ValueError(f"Unknown MODE: {mode!r}")
     if mode == "intensity":
         return
-    if waveform not in ("Monophasic", "Biphasic", "HalfSine"):
+    if waveform not in NON_BURST_WAVEFORMS:
         raise ValueError("PULSE_WAVEFORM must be Monophasic, Biphasic or HalfSine (no burst).")
     if not isinstance(pulse_map, dict) or not alphabet:
         raise ValueError("PULSE_MAP and ALPHABET must be nonempty.")
@@ -79,6 +82,7 @@ class StimulatorController:
         self._waveform = waveform
         self._prepared = False
         self._arm_was_confirmed = False
+        self._last_profile = None
 
     # ── connection ────────────────────────────────────────────────────
     def connect(self):
@@ -91,7 +95,7 @@ class StimulatorController:
         )
         log(f"Connecting to MagVenture on {self._port}...", "INFO")
         try:
-            device_class = PairedPulseMagVenture if self._paired_pulse else mp.MagVenture
+            device_class = PairedPulseMagVenture if self._paired_pulse else MagVenture
             self._stimulator = device_class(self._port, wait_s=config.MAGVENTURE_RESPONSE_DELAY)
             self._stimulator.connect()
             self._stimulator.set_page("Main", get_response=False)
@@ -101,6 +105,39 @@ class StimulatorController:
             raise
 
     # ── pulse preparation ─────────────────────────────────────────────
+    def _profile_is_current(self, mode, waveform, ipi, a_intensity, b_intensity):
+        """Require live settings and amplitude readback before reusing a profile."""
+        try:
+            settings = _checked(self._stimulator.get_pulse_settings(), "repeat settings")
+            if not isinstance(settings, dict):
+                raise RuntimeError("Pulse settings readback is not a single response.")
+            actual_waveform = settings.get("Waveform")
+            if (
+                settings.get("Mode") != mode
+                or settings.get("CurrentDirection") != "Normal"
+                or actual_waveform not in NON_BURST_WAVEFORMS
+                or (waveform is not None and actual_waveform != waveform)
+                or ipi_ticks(settings.get("IPIvalue")) != ipi_ticks(ipi)
+            ):
+                raise RuntimeError(f"Pulse settings changed: {settings!r}")
+
+            status = _checked(self._stimulator.get_status(), "repeat status")
+            expected = {
+                "Status": "Enabled", "Mode": mode, "Waveform": actual_waveform,
+                "amplitudePercentage_A": a_intensity,
+            }
+            if b_intensity is not None:
+                expected["amplitudePercentage_B"] = b_intensity
+            if not isinstance(status, dict) or any(
+                status.get(key) != value for key, value in expected.items()
+            ):
+                raise RuntimeError(f"Stimulator status changed: {status!r}")
+        except Exception as error:
+            log(f"Repeated profile could not be confirmed. Preparing again: {error}", "INFO")
+            return False
+        log("Repeated profile confirmed by current settings and status.", "INFO")
+        return True
+
     def prepare_pulse(self, intensity_value):
         """Configure the stimulator mode, arm it, and set amplitude.
 
@@ -109,6 +146,13 @@ class StimulatorController:
         intensity_value : int
             Target intensity in % MSO.
         """
+        previous = self._last_profile
+        self._last_profile = None
+        requested = ("Standard", None, 10, intensity_value, None)
+        if requested == previous and self._profile_is_current(*requested):
+            self._last_profile = requested
+            return
+
         try:
             log(f"Setting mode with intensity: {intensity_value}", "DEBUG")
             self._stimulator.set_mode(
@@ -125,6 +169,7 @@ class StimulatorController:
             log("Setting amplitude...", "DEBUG")
             self._stimulator.set_amplitude(intensity_value, b_amp=None)
             time.sleep(1)
+            self._last_profile = requested
         except Exception as e:
             log(f"Error in prepare_pulse:\n{traceback.format_exc()}", "ERROR")
             raise
@@ -134,6 +179,7 @@ class StimulatorController:
         try:
             return _checked(result, operation)
         except RuntimeError as command_error:
+            log(f"{command_error}. Reading settings for confirmation.", "DEBUG")
             try:
                 response = _checked(
                     self._stimulator.get_pulse_settings(), f"readback after {operation}"
@@ -180,15 +226,24 @@ class StimulatorController:
     def prepare_stimulus(self, profile):
         """Prepare one Standard/Dual event; never synthesize A/B timing in Python."""
         self._prepared = False
+        previous = self._last_profile
+        self._last_profile = None
         check_enabled = self._arm_was_confirmed
         self._arm_was_confirmed = False
         if not self._paired_pulse:
             raise RuntimeError("Pulse profiles require the paired-pulse controller.")
         validate_profile(profile)
-        if self._waveform not in ("Monophasic", "Biphasic", "HalfSine"):
+        if self._waveform not in NON_BURST_WAVEFORMS:
             raise ValueError("Unsupported non-burst waveform.")
         mode = "Dual" if profile["type"] == "paired" else "Standard"
         ipi = profile.get("ipi_ms", 10)
+        requested = (mode, self._waveform, ipi, profile["a_intensity"], profile.get("b_intensity"))
+        if requested == previous and self._profile_is_current(*requested):
+            self._last_profile = requested
+            self._arm_was_confirmed = True
+            self._prepared = True
+            return
+
         settings = dict(current_dir="Normal", n_pulses_per_burst=2,
                         ipi=ipi, baratio=1, get_response=True)
         log(f"Preparing requested pulse profile: {profile}; waveform={self._waveform}", "INFO")
@@ -223,6 +278,7 @@ class StimulatorController:
         actual_ipi = _checked(self._stimulator.get_ipi(), "get_ipi")
         if actual_mode != mode or ipi_ticks(actual_ipi) != ipi_ticks(ipi):
             raise RuntimeError(f"Stimulator mode/IPI readback mismatch: {actual_mode!r}, {actual_ipi!r}")
+        self._last_profile = requested
         self._arm_was_confirmed = True
         self._prepared = True
 
@@ -239,6 +295,7 @@ class StimulatorController:
             log("Fire command successful.", "DEBUG")
         except Exception as e:
             self._arm_was_confirmed = False
+            self._last_profile = None
             log(f"Error in fire():\n{traceback.format_exc()}", "ERROR")
             raise
 
@@ -247,6 +304,7 @@ class StimulatorController:
         """Require disable acknowledgement or a fresh, successful disabled readback."""
         self._prepared = False
         self._arm_was_confirmed = False
+        self._last_profile = None
         if self._stimulator is not None:
             try:
                 result = self._stimulator.disarm(get_response=True)

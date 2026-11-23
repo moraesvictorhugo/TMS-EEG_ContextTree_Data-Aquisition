@@ -197,7 +197,7 @@ def test_acknowledged_arm_needs_no_fallback(controller):
     controller._stimulator.get_status.assert_not_called()
 
 
-def test_constant_paired_sequence_checks_enabled_instead_of_rearming(controller, monkeypatch):
+def test_constant_paired_sequence_reuses_only_confirmed_profile(controller, monkeypatch):
     from tms_eeg import main as experiment
 
     monkeypatch.setattr(config, "MODE", "paired-pulse")
@@ -206,19 +206,17 @@ def test_constant_paired_sequence_checks_enabled_instead_of_rearming(controller,
     monkeypatch.setattr(config, "ITI", (0, 0))
     monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: False)
     device = controller._stimulator
-    enabled = False
-
-    def arm(get_response):
-        nonlocal enabled
-        assert get_response is True
-        if enabled:
-            return "Empty", 1
-        enabled = True
-        return {"Status": "Enabled"}, 0
-
-    device.arm.side_effect = arm
-    device.get_status.side_effect = lambda: ({"Status": "Enabled" if enabled else "Disabled"}, 0)
-    device.get_ipi.return_value = (config.PULSE_MAP[1]["ipi_ms"], 0)
+    profile = config.PULSE_MAP[1]
+    device.get_ipi.return_value = (profile["ipi_ms"], 0)
+    device.get_pulse_settings.return_value = ({
+        "Mode": "Dual", "CurrentDirection": "Normal", "Waveform": "Biphasic",
+        "IPIvalue": profile["ipi_ms"],
+    }, 0)
+    device.get_status.return_value = ({
+        "Status": "Enabled", "Mode": "Dual", "Waveform": "Biphasic",
+        "amplitudePercentage_A": profile["a_intensity"],
+        "amplitudePercentage_B": profile["b_intensity"],
+    }, 0)
     tracker = Mock(all_target_status=True, status_lock=Lock())
     trigger = Mock()
 
@@ -226,10 +224,35 @@ def test_constant_paired_sequence_checks_enabled_instead_of_rearming(controller,
 
     device.arm.assert_called_once_with(get_response=True)
     assert device.get_status.call_count == 4
+    assert device.get_pulse_settings.call_count == 4
     assert device.fire.call_count == 5
     assert trigger.send.call_args_list == [call(2)] * 5
-    assert device.set_amplitude.call_count == 5
+    assert device.set_mode.call_count == 1
+    assert device.set_waveform.call_count == 1
+    assert device.set_amplitude.call_count == 1
     device.disarm.assert_not_called()
+
+
+def test_paired_profile_mismatch_requires_full_preparation(controller):
+    profile = config.PULSE_MAP[2]
+    device = controller._stimulator
+    controller.prepare_stimulus(profile)
+    controller.fire()
+    device.get_pulse_settings.return_value = ({
+        "Mode": "Dual", "CurrentDirection": "Normal", "Waveform": "Biphasic",
+        "IPIvalue": profile["ipi_ms"],
+    }, 0)
+    device.get_status.return_value = ({
+        "Status": "Enabled", "Mode": "Dual", "Waveform": "Biphasic",
+        "amplitudePercentage_A": profile["a_intensity"],
+        "amplitudePercentage_B": profile["b_intensity"] - 1,
+    }, 0)
+
+    controller.prepare_stimulus(profile)
+
+    assert device.set_mode.call_count == 2
+    assert device.set_waveform.call_count == 2
+    assert device.set_amplitude.call_count == 2
 
 
 def test_paired_preparation_rearms_when_fresh_status_is_disabled(controller):
@@ -259,10 +282,48 @@ def test_legacy_preparation_unchanged(monkeypatch):
     ]
 
 
+def test_intensity_reuses_confirmed_profile_until_disarm_or_readback_failure(monkeypatch):
+    monkeypatch.setattr(module.time, "sleep", Mock())
+    controller = module.StimulatorController("unused")
+    device = controller._stimulator = Mock()
+    device.disarm.return_value = ({}, 0)
+    device.get_pulse_settings.return_value = ({
+        "Mode": "Standard", "CurrentDirection": "Normal", "Waveform": "Biphasic",
+        "IPIvalue": 10,
+    }, 0)
+    device.get_status.return_value = ({
+        "Status": "Enabled", "Mode": "Standard", "Waveform": "Biphasic",
+        "amplitudePercentage_A": 12,
+    }, 0)
+
+    controller.prepare_pulse(12)
+    controller.fire()
+    controller.prepare_pulse(12)
+    device.get_pulse_settings.assert_called_once_with()
+    device.get_status.assert_called_once_with()
+    assert device.set_amplitude.call_count == 1
+
+    controller.fire()
+    controller.disarm()
+    controller.prepare_pulse(12)
+    device.get_pulse_settings.assert_called_once_with()
+    assert device.set_amplitude.call_count == 2
+
+    controller.fire()
+    device.get_status.return_value = ("Empty", 1)
+    controller.prepare_pulse(12)
+    assert device.set_amplitude.call_count == 3
+
+    controller.fire()
+    controller.prepare_pulse(13)
+    assert device.set_amplitude.call_count == 4
+    assert device.get_pulse_settings.call_count == 2
+
+
 @pytest.mark.parametrize("paired", [False, True])
 def test_connection_selects_opt_in_class(monkeypatch, paired):
     original, adapter = Mock(), Mock()
-    monkeypatch.setattr(module.mp, "MagVenture", original)
+    monkeypatch.setattr(module, "MagVenture", original)
     monkeypatch.setattr(module, "PairedPulseMagVenture", adapter)
     monkeypatch.setattr(module.mp, "list_serial_ports", Mock())
     monkeypatch.setattr("builtins.input", Mock())

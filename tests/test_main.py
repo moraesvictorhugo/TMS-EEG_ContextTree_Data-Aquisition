@@ -1,6 +1,7 @@
 """Test startup selection without connecting or firing physical equipment."""
 from unittest.mock import Mock
 from threading import Lock
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,10 +128,70 @@ def test_actual_tree_output_profiles_validated(monkeypatch, startup_mocks):
 def loop_mocks(monkeypatch):
     monkeypatch.setattr(experiment.config, "NUMBER_OF_BLOCKS", 1)
     monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 1)
+    monkeypatch.setattr(experiment.config, "ITI", (0, 0))
     monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: False)
     monkeypatch.setattr(experiment.time, "sleep", Mock())
     tracker = Mock(all_target_status=True, status_lock=Lock())
     return tracker, Mock(), Mock()
+
+
+@pytest.mark.parametrize("mode,prepare_seconds", [("intensity", 3.5), ("paired-pulse", 3.2)])
+def test_iti_includes_preparation_and_restarts_after_overrun(
+    monkeypatch, loop_mocks, mode, prepare_seconds
+):
+    tracker, stimulator, trigger = loop_mocks
+    monkeypatch.setattr(experiment.config, "MODE", mode)
+    monkeypatch.setattr(experiment.config, "ITI", (4, 4))
+    now = 0.0
+    fired = []
+    starts = []
+    durations = iter([prepare_seconds, prepare_seconds, 5, prepare_seconds])
+
+    def sleep(seconds):
+        nonlocal now
+        now += seconds
+
+    def prepare(_profile):
+        starts.append(now)
+        sleep(next(durations))
+
+    monkeypatch.setattr(experiment, "time", SimpleNamespace(sleep=sleep, monotonic=lambda: now))
+    selected = stimulator.prepare_stimulus if mode == "paired-pulse" else stimulator.prepare_pulse
+    selected.side_effect = prepare
+    stimulator.fire.side_effect = lambda: fired.append(now)
+    experiment.run_experiment([1, 1, 2, 1], tracker, stimulator, trigger)
+
+    assert fired[1] - fired[0] == pytest.approx(4)
+    assert fired[2] - fired[1] >= 5
+    assert fired[3] - fired[2] == pytest.approx(4)
+    if mode == "paired-pulse":
+        assert starts[1] - fired[0] >= experiment.config.PULSE_MAP[1]["ipi_ms"] / 1000
+    assert now - fired[-1] < 1
+
+
+def test_target_loss_while_waiting_for_iti_forces_new_preparation(monkeypatch, loop_mocks):
+    tracker, stimulator, trigger = loop_mocks
+    monkeypatch.setattr(experiment.config, "MODE", "intensity")
+    monkeypatch.setattr(experiment.config, "ITI", (4, 4))
+    now = 0.0
+    lost_target = False
+
+    def sleep(seconds):
+        nonlocal now, lost_target
+        now += seconds
+        if stimulator.prepare_pulse.call_count == 2 and not lost_target:
+            tracker.all_target_status = False
+            lost_target = True
+
+    monkeypatch.setattr(experiment, "time", SimpleNamespace(sleep=sleep, monotonic=lambda: now))
+    stimulator.disarm.side_effect = lambda: setattr(tracker, "all_target_status", True)
+    fired = []
+    stimulator.fire.side_effect = lambda: fired.append(now)
+    experiment.run_experiment([0, 1], tracker, stimulator, trigger)
+
+    stimulator.disarm.assert_called_once_with()
+    assert stimulator.prepare_pulse.call_count == 3
+    assert fired == pytest.approx([0, 4])
 
 
 @pytest.mark.parametrize("mode", ["intensity", "paired-pulse"])

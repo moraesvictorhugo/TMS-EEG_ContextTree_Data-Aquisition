@@ -27,6 +27,11 @@ from tms_eeg.navigation.tracker import NavigationTracker
 from tms_eeg.logger import log
 
 
+# Allow serial dispatch time in addition to the hardware-timed A/B interval
+# before changing settings or disarming after a successful paired event.
+PAIR_DISPATCH_MARGIN_S = 0.05
+
+
 def wait_for_key(key, prompt):
     """Block until the user presses the given key.
 
@@ -118,6 +123,8 @@ def run_experiment(sequence, tracker, stimulator, trigger):
     last_block_boundary = 0
     block_pause = False
     block_resume_released = False
+    prepared = False
+    next_trial_at = None
 
     while True:
         # ── safety bounds check ───────────────────────────────────────
@@ -168,6 +175,7 @@ def run_experiment(sequence, tracker, stimulator, trigger):
         # ── pause / resume ────────────────────────────────────────────
         if keyboard.is_pressed("b") and not paused:
             stimulator.disarm()
+            prepared = False
             paused = True
             log("Paused sequence (key B).", "INFO")
             print("Paused sequence (key B).")
@@ -190,37 +198,41 @@ def run_experiment(sequence, tracker, stimulator, trigger):
         current_status = tracker.all_target_status
         target_history.append(current_status)
 
-        if not all(target_history):
+        if not prepared and not all(target_history):
             time.sleep(0.01)
             continue
-        
-        log(f"Target tracking passed. Preparing to fire pulse {pulse_index + 1}.", "DEBUG")
 
         # ── fire pulse ────────────────────────────────────────────────
         fire_attempted = False
         stage = "preparation"
         stimulus = sequence[pulse_index]
         try:
-            if config.MODE == "paired-pulse":
-                profile = config.PULSE_MAP[stimulus]
-                print(f"Pulse profile: {profile} (event {stimulus})")
-                stimulator.prepare_stimulus(profile)
-            else:
-                intensity = config.INTENSITY_MAP[stimulus]
-                log(f"Sequence requested stimulus: {stimulus}, Intensity mapping: {intensity}", "DEBUG")
-                print(f"Intensity: {intensity} (event {stimulus})")
+            paired_mode = config.MODE == "paired-pulse"
+            profile = config.PULSE_MAP[stimulus] if paired_mode else None
+            if not prepared:
+                log(f"Target tracking passed. Preparing to fire pulse {pulse_index + 1}.", "DEBUG")
+                if paired_mode:
+                    print(f"Pulse profile: {profile} (event {stimulus})")
+                    stimulator.prepare_stimulus(profile)
+                else:
+                    intensity = config.INTENSITY_MAP[stimulus]
+                    print(f"Intensity: {intensity} (event {stimulus})")
+                    stimulator.prepare_pulse(intensity)
+                prepared = True
+                log("Stimulator armed successfully.", "DEBUG")
 
-                log("Calling stimulator.prepare_pulse()", "DEBUG")
-                stimulator.prepare_pulse(intensity)
-            log("Stimulator armed successfully.", "DEBUG")
-
+            remaining = 0.0
             with tracker.status_lock:
-                target_lost = not tracker.all_target_status
-                if not target_lost:
+                target_lost = not current_status or not tracker.all_target_status
+                if next_trial_at is not None:
+                    remaining = next_trial_at - time.monotonic()
+                if not target_lost and remaining <= 0:
                     log("Calling stimulator.fire()", "DEBUG")
                     stage = "fire (delivery uncertain on failure)"
                     fire_attempted = True
+                    fired_at = time.monotonic()
                     stimulator.fire()
+                    fire_returned_at = time.monotonic()
                     # trigger for EEG: 0→1, 1→2, 2→3
                     log(f"Sending trigger value: {stimulus + 1}", "DEBUG")
                     stage = "EEG trigger after fire"
@@ -230,6 +242,7 @@ def run_experiment(sequence, tracker, stimulator, trigger):
                 # Normal operational wait, not a failed preparation. Release
                 # the navigation lock before serial I/O so tracking can update.
                 print(f"Coil out of target. Waiting at event {pulse_index + 1}; sequence preserved.")
+                prepared = False
                 target_history.clear()
                 target_history.extend([False] * config.TARGET_HISTORY_SIZE)
                 try:
@@ -241,15 +254,29 @@ def run_experiment(sequence, tracker, stimulator, trigger):
                           "firing blocked. Check device, then press R to retry disarm (Ctrl+C to exit).")
                 continue
 
-            print("Firing")
-            time.sleep(random.uniform(*config.ITI))
+            if not fire_attempted:
+                time.sleep(min(remaining, 0.01))
+                continue
 
+            if next_trial_at is not None:
+                log(f"Trial dispatch lateness: {fired_at - next_trial_at:.3f} s", "DEBUG")
+
+            # Start the next ITI from this actual command, including after an overrun.
+            if pulse_index + 1 < len(sequence):
+                next_trial_at = fired_at + random.uniform(*config.ITI)
+
+            if profile is not None and profile["type"] == "paired":
+                pair_end = fire_returned_at + profile["ipi_ms"] / 1000 + PAIR_DISPATCH_MARGIN_S
+                time.sleep(max(0, pair_end - time.monotonic()))
+
+            prepared = False
             print(f"Pulse index: {pulse_index + 1}")
             log(f"Pulse index {pulse_index} successfully fired.", "INFO")
             pulse_index += 1
             preparation_failures = 0
 
         except Exception as e:
+            prepared = False
             error_details = traceback.format_exc()
             log(f"Exception during pulse firing:\n{error_details}", "ERROR")
             print(f"\n⚠️ ERRO in pulse {pulse_index}: {e}")

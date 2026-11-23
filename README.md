@@ -97,10 +97,13 @@ sequence is generated once and optionally exported as `constant_sequence_...`.
 The default algorithm remains `context tree`; the pseudo-random no-repeat rule
 is unchanged and is intentionally not used for a constant condition.
 
-**Timing is unchanged:** `ITI` remains a post-event wait plus subsequent
-preparation/communication and possible target waits. Setting `ITI = (4, 6)`
-does not guarantee 4–6 seconds between physical pulses. No onset-to-onset
-scheduling or preparation-time optimization is included in this feature.
+Both modes draw the interval from `ITI` (default `(4, 6)` seconds) and
+schedule each trial relative to the previous fire command, with preparation
+inside that interval. An event fires when its deadline has arrived and both
+preparation and target checks pass. Late events start a new interval from their
+own fire command. Measure physical pulse-to-pulse timing in the acquisition.
+`MAGVENTURE_RESPONSE_DELAY` controls the pause before MagicPy reads a reply
+and defaults to 0.05 s. Validate serial timing on the connected equipment.
 
 ## Experiment blocks
 
@@ -117,11 +120,12 @@ The full sequence is generated/exported once. Block boundaries do not reset
 context-tree history, pseudo-random order or the global event index. Paired
 events still count as one trial each.
 
-After each internal boundary (including the last trial's normal ITI), the
-stimulator is disarmed and the session waits indefinitely for **G**. Release
+At each internal boundary, after allowing the final pair to complete if
+applicable, the stimulator is disarmed and the session waits for **G**. Release
 G and press it again if already held. Resume requires reacquiring target history
 and preparing the next event. There is no programmed rest duration and no pause
-after the final block. B/G manual pause and target-loss waiting remain available.
+after the final block. The next block's first trial still observes its ITI
+deadline. B/G manual pause and target-loss waiting remain available.
 
 If block-boundary disarm is not confirmed, firing is blocked: **R** retries the
 disarm; once confirmed, **G is still required** to start the next block. Ctrl+C
@@ -190,9 +194,9 @@ The ESP32 firmware is unchanged: one EEG code marks the condition/event, not
 individually synchronized A/B onsets. Existing software-trigger jitter remains.
 An exception during or after an attempted fire stops the sequence without
 repeating that event: delivery may be uncertain. Requested profiles are printed at startup and per event; use actual device
-records/measurements to confirm delivery. Preparation adds response/readback time
-in addition to the original waits; ITI remains the post-event wait, not a precise
-onset-to-onset trial interval.
+records/measurements to confirm delivery. A fresh Enabled status can avoid a
+repeated arm command on successive paired-mode trials. The controller still
+checks settings and amplitude-command responses for every trial.
 
 If `set_mode` or `set_waveform` returns a MagicPy error (including `Empty`),
 the paired controller requests fresh command-09 settings. Preparation continues
@@ -246,7 +250,7 @@ prints `Arm confirmed by independent Enabled status readback.`
 Reported reference equipment: X100 + Option, C-B70; GUI 7.2.5, PIC1 5.5.2,
 PIC2 4.0.0, Nimbus 2.0.4. This records operator-provided identification, not a
 certification of firmware compatibility or physical safety. Normal preparation,
-post-event ITI, sequence algorithms and EEG codes are unchanged. No thermal
+sequence algorithms and EEG codes are unchanged. No thermal
 limits, automatic reconnection or session recovery are implemented here.
 
 See [TESTING.md](TESTING.md) for details.

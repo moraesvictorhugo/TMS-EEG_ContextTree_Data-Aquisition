@@ -6,11 +6,11 @@ Edit the values below before each experiment session.
 
 # ─── Experiment protocol ──────────────────────────────────────────────
 MODE = "paired-pulse"            # "intensity" (legacy) or "paired-pulse"
-VOLUNTEER_CODE = "V00"        # volunteer identifier
+VOLUNTEER_CODE = "V23"        # volunteer identifier
 EXPORT_SEQUENCE_TXT = False   # whether to save the generated sequence to a .txt file
 
 # ─── Volunteer's motor threshold ──────────────────────────────────────
-RMT_INTENSITY = 10            # resting motor threshold (% MSO)
+RMT_INTENSITY = 40            # resting motor threshold (% MSO)
 
 # Derived intensity levels (computed from RMT_INTENSITY)
 INTENSITY_0 = int(0.8 * RMT_INTENSITY)   # 80% rMT
@@ -35,7 +35,7 @@ PULSE_MAP = {
     0: {"label": "single", "type": "single", "a_intensity": INTENSITY_2},
     1: {
         "label": "paired_1", "type": "paired",
-        "a_intensity": INTENSITY_0, "b_intensity": INTENSITY_2, "ipi_ms": 10.0,
+        "a_intensity": INTENSITY_2, "b_intensity": INTENSITY_2, "ipi_ms": 100.0,
     },
     2: {
         "label": "paired_2", "type": "paired",
@@ -46,12 +46,11 @@ PULSE_MAP = {
 # ─── Sequence generation ─────────────────────────────────────────────
 SEQUENCE_ALGORITHM = "constant"  # "context tree", "pseudo-random" or "constant"
 ALPHABET = [1]          # possible stimulus types; constant requires one, e.g. [2]
-NUMBER_OF_STIMULI = 100       # total number of trials
-NUMBER_OF_BLOCKS = 1          # equal blocks; total must be divisible; G resumes
+NUMBER_OF_STIMULI = 400       # total number of trials
+NUMBER_OF_BLOCKS = 2          # equal blocks; total must be divisible; G resumes
 
 # ─── Timing ──────────────────────────────────────────────────────────
-ITI = (1, 3)                  # inter-trial interval range in seconds
-                              # MagicPy already adds ~3 s due to sleep calls
+ITI = (4, 6)                  # seconds between trial starts (single pulse or pulse A)
 
 # ─── Target tracking ─────────────────────────────────────────────────
 TARGET_HISTORY_SIZE = 50      # how many consecutive True statuses are needed
@@ -70,6 +69,7 @@ PUB_MESSAGES = [
 
 # ─── MagVenture stimulator ───────────────────────────────────────────
 MAGVENTURE_PORT = "COM1"
+MAGVENTURE_RESPONSE_DELAY = 0.05  # seconds before MagicPy reads a serial response
 
 # ─── ESP32 trigger ───────────────────────────────────────────────────
 ESP32_SERIAL_PORT = "COM3"
@@ -77,4 +77,4 @@ ESP32_BAUD_RATE = 115200
 ESP32_STARTUP_DELAY = 2       # seconds to wait for ESP32 reboot after serial open
 
 # ─── Debug and Logging ───────────────────────────────────────────────
-ENABLE_LOGGING = True         # Toggle to enable verbose print statements
+ENABLE_LOGGING = False         # Toggle to enable verbose print statements

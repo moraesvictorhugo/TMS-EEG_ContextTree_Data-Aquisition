@@ -8,6 +8,7 @@ import time
 import traceback
 
 import magicpy as mp
+from tms_eeg import config
 from tms_eeg.logger import log
 from tms_eeg.hardware.magicpy_adapter import PairedPulseMagVenture, ipi_ticks
 
@@ -77,6 +78,7 @@ class StimulatorController:
         self._paired_pulse = paired_pulse
         self._waveform = waveform
         self._prepared = False
+        self._arm_was_confirmed = False
 
     # ── connection ────────────────────────────────────────────────────
     def connect(self):
@@ -90,7 +92,7 @@ class StimulatorController:
         log(f"Connecting to MagVenture on {self._port}...", "INFO")
         try:
             device_class = PairedPulseMagVenture if self._paired_pulse else mp.MagVenture
-            self._stimulator = device_class(self._port)
+            self._stimulator = device_class(self._port, wait_s=config.MAGVENTURE_RESPONSE_DELAY)
             self._stimulator.connect()
             self._stimulator.set_page("Main", get_response=False)
             log("Connected to MagVenture successfully.", "INFO")
@@ -178,6 +180,8 @@ class StimulatorController:
     def prepare_stimulus(self, profile):
         """Prepare one Standard/Dual event; never synthesize A/B timing in Python."""
         self._prepared = False
+        check_enabled = self._arm_was_confirmed
+        self._arm_was_confirmed = False
         if not self._paired_pulse:
             raise RuntimeError("Pulse profiles require the paired-pulse controller.")
         validate_profile(profile)
@@ -202,8 +206,15 @@ class StimulatorController:
         ):
             raise RuntimeError(f"Stimulator mode/waveform readback mismatch: {response!r}")
         time.sleep(1)
-        self._arm_confirmed()
-        time.sleep(1)
+        already_enabled = False
+        if check_enabled:
+            status, error = self._stimulator.get_status()
+            already_enabled = (
+                error == 0 and isinstance(status, dict) and status.get("Status") == "Enabled"
+            )
+        if not already_enabled:
+            self._arm_confirmed()
+            time.sleep(1)
         _checked(self._stimulator.set_amplitude(
             profile["a_intensity"], b_amp=profile.get("b_intensity"), get_response=True
         ), "set_amplitude")
@@ -212,6 +223,7 @@ class StimulatorController:
         actual_ipi = _checked(self._stimulator.get_ipi(), "get_ipi")
         if actual_mode != mode or ipi_ticks(actual_ipi) != ipi_ticks(ipi):
             raise RuntimeError(f"Stimulator mode/IPI readback mismatch: {actual_mode!r}, {actual_ipi!r}")
+        self._arm_was_confirmed = True
         self._prepared = True
 
     # ── firing ────────────────────────────────────────────────────────
@@ -226,6 +238,7 @@ class StimulatorController:
             self._stimulator.fire()
             log("Fire command successful.", "DEBUG")
         except Exception as e:
+            self._arm_was_confirmed = False
             log(f"Error in fire():\n{traceback.format_exc()}", "ERROR")
             raise
 
@@ -233,6 +246,7 @@ class StimulatorController:
     def disarm(self):
         """Require disable acknowledgement or a fresh, successful disabled readback."""
         self._prepared = False
+        self._arm_was_confirmed = False
         if self._stimulator is not None:
             try:
                 result = self._stimulator.disarm(get_response=True)

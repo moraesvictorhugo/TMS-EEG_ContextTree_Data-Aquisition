@@ -14,6 +14,7 @@ def test_block_pauses_preserve_sequence(monkeypatch, mode, total, blocks, consta
     monkeypatch.setattr(experiment.config, "MODE", mode)
     monkeypatch.setattr(experiment.config, "NUMBER_OF_BLOCKS", blocks)
     monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 3)
+    monkeypatch.setattr(experiment.config, "ITI", (0, 0))
     tracker = Mock(all_target_status=True, status_lock=Lock())
     stimulator, trigger = Mock(), Mock()
     sequence = (experiment.generate_constant_sequence(total, [2]) if constant
@@ -46,6 +47,7 @@ def test_block_disarm_recovery_still_requires_g(monkeypatch):
     monkeypatch.setattr(experiment.config, "MODE", "intensity")
     monkeypatch.setattr(experiment.config, "NUMBER_OF_BLOCKS", 2)
     monkeypatch.setattr(experiment.config, "TARGET_HISTORY_SIZE", 1)
+    monkeypatch.setattr(experiment.config, "ITI", (0, 0))
     tracker = Mock(all_target_status=True, status_lock=Lock())
     stimulator, trigger = Mock(), Mock()
     stimulator.disarm.side_effect = [RuntimeError("ack missing"), None]

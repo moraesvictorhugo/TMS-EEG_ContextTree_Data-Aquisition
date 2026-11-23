@@ -197,12 +197,13 @@ def test_acknowledged_arm_needs_no_fallback(controller):
     controller._stimulator.get_status.assert_not_called()
 
 
-def test_constant_paired_sequence_with_empty_ack_when_already_enabled(controller, monkeypatch):
+def test_constant_paired_sequence_checks_enabled_instead_of_rearming(controller, monkeypatch):
     from tms_eeg import main as experiment
 
     monkeypatch.setattr(config, "MODE", "paired-pulse")
     monkeypatch.setattr(config, "NUMBER_OF_BLOCKS", 1)
     monkeypatch.setattr(config, "TARGET_HISTORY_SIZE", 1)
+    monkeypatch.setattr(config, "ITI", (0, 0))
     monkeypatch.setattr(experiment.keyboard, "is_pressed", lambda key: False)
     device = controller._stimulator
     enabled = False
@@ -223,12 +224,25 @@ def test_constant_paired_sequence_with_empty_ack_when_already_enabled(controller
 
     experiment.run_experiment([1] * 5, tracker, controller, trigger)
 
-    assert device.arm.call_count == 5
+    device.arm.assert_called_once_with(get_response=True)
     assert device.get_status.call_count == 4
     assert device.fire.call_count == 5
     assert trigger.send.call_args_list == [call(2)] * 5
     assert device.set_amplitude.call_count == 5
     device.disarm.assert_not_called()
+
+
+def test_paired_preparation_rearms_when_fresh_status_is_disabled(controller):
+    profile = config.PULSE_MAP[2]
+    device = controller._stimulator
+    controller.prepare_stimulus(profile)
+    controller.fire()
+    device.get_status.return_value = ({"Status": "Disabled"}, 0)
+
+    controller.prepare_stimulus(profile)
+
+    device.get_status.assert_called_once_with()
+    assert device.arm.call_args_list == [call(get_response=True)] * 2
 
 
 def test_legacy_preparation_unchanged(monkeypatch):
@@ -254,7 +268,7 @@ def test_connection_selects_opt_in_class(monkeypatch, paired):
     monkeypatch.setattr("builtins.input", Mock())
     module.StimulatorController("unused", paired_pulse=paired).connect()
     selected, other = (adapter, original) if paired else (original, adapter)
-    selected.assert_called_once_with("unused")
+    selected.assert_called_once_with("unused", wait_s=config.MAGVENTURE_RESPONSE_DELAY)
     other.assert_not_called()
 
 

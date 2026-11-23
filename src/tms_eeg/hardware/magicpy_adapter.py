@@ -28,21 +28,30 @@ def ipi_ticks(ipi):
 class MagVenture(mp.MagVenture):
     """Expose complete readback and report the serial reads MagicPy performs."""
 
+    _recover_status_with_didt = True
+
     def process_command(self, command_length, command_bytes, resp_len_exp=8, get_response=False):
         process = super().process_command
-        if not get_response or not config.ENABLE_LOGGING:
+        trace = bool(get_response and config.ENABLE_LOGGING)
+        recover_status = (
+            self._recover_status_with_didt
+            and (command_length, command_bytes, resp_len_exp, get_response) == ("01", "00", 13, 3)
+        )
+        if not trace and not recover_status:
             return process(command_length, command_bytes, resp_len_exp, get_response)
 
-        # Instrument the inherited transaction without changing its byte handling,
-        # timeouts or decoding. The acquisition loop owns the serial port.
+        # Observe the inherited transaction. The acquisition loop owns the port.
         port = self.port
         read = port.read
         received = 0
+        packet = bytearray()
 
         def read_and_count(*args, **kwargs):
             nonlocal received
             data = read(*args, **kwargs)
             received += len(data)
+            if recover_status:
+                packet.extend(data)
             return data
 
         parts = [command_bytes] if isinstance(command_bytes, str) else command_bytes
@@ -52,21 +61,51 @@ class MagVenture(mp.MagVenture):
         result = "exception"
         try:
             response, error = process(command_length, command_bytes, resp_len_exp, get_response)
+            if recover_status and error == 1:
+                status = self._status_from_mixed_reply(packet, response)
+                if status is not None:
+                    response, error = status, 0
+                    log("MagicPy status recovered from a reply containing a di/dt frame.", "DEBUG")
             result = f"{type(response).__name__}, error={error!r}"
             if isinstance(response, str):
                 result = f"{response!r}, error={error!r}"
             return response, error
         finally:
             port.read = read
-            elapsed = time.monotonic() - started_at
-            size = "exact" if received == resp_len_exp else "short" if received < resp_len_exp else "extra"
-            if not received:
-                size = "empty"
-            log(
-                f"MagicPy {command}: {elapsed:.3f} s, expected {resp_len_exp} bytes, "
-                f"received {received} bytes ({size}), result={result}",
-                "DEBUG",
-            )
+            if trace:
+                elapsed = time.monotonic() - started_at
+                size = "exact" if received == resp_len_exp else "short" if received < resp_len_exp else "extra"
+                if not received:
+                    size = "empty"
+                log(
+                    f"MagicPy {command}: {elapsed:.3f} s, expected {resp_len_exp} bytes, "
+                    f"received {received} bytes ({size}), result={result}",
+                    "DEBUG",
+                )
+
+    def _status_from_mixed_reply(self, packet, response):
+        """Accept one complete status frame accompanied by one di/dt frame."""
+        if len(packet) != 21 or not isinstance(response, list) or len(response) != 2:
+            return None
+
+        status_header = b"\xfe\x09\x00"
+        didt_header = b"\xfe\x04\x02"
+        if packet.startswith(didt_header):
+            didt, status = packet[:8], packet[8:]
+            didt_data, status_data = response
+        else:
+            status, didt = packet[:13], packet[13:]
+            status_data, didt_data = response
+        if not isinstance(status_data, dict) or didt_data is not None:
+            return None
+
+        for frame, header in ((status, status_header), (didt, didt_header)):
+            if not frame.startswith(header) or frame[-1] != 0xff:
+                return None
+            checksum = self.calc_crc([f"{byte:02x}" for byte in frame[2:-2]])
+            if int(checksum, 16) != frame[-2]:
+                return None
+        return status_data
 
     def get_pulse_settings(self):
         """Read the complete command-09 settings without changing device state.
@@ -84,6 +123,8 @@ class MagVenture(mp.MagVenture):
 
 class PairedPulseMagVenture(MagVenture):
     """Encode 1–200 ms IPIs; device resolution is checked by the controller."""
+
+    _recover_status_with_didt = False
 
     def parse_ipi(self, ipi):
         ticks = ipi_ticks(ipi)

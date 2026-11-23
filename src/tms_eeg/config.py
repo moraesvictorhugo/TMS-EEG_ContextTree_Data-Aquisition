@@ -5,7 +5,7 @@ Edit the values below before each experiment session.
 """
 
 # ─── Experiment protocol ──────────────────────────────────────────────
-MODE = "paired-pulse"            # "intensity" (legacy) or "paired-pulse"
+MODE = "intensity"            # "intensity" (legacy) or "paired-pulse"
 VOLUNTEER_CODE = "V00"        # volunteer identifier
 EXPORT_SEQUENCE_TXT = False   # whether to save the generated sequence to a .txt file
 
@@ -44,8 +44,8 @@ PULSE_MAP = {
 }
 
 # ─── Sequence generation ─────────────────────────────────────────────
-SEQUENCE_ALGORITHM = "constant"  # "context tree", "pseudo-random" or "constant"
-ALPHABET = [1]          # possible stimulus types; constant requires one, e.g. [2]
+SEQUENCE_ALGORITHM = "context tree"  # "context tree", "pseudo-random" or "constant"
+ALPHABET = [0, 1, 2]          # possible stimulus types; constant requires one, e.g. [2]
 NUMBER_OF_STIMULI = 400       # total number of trials
 NUMBER_OF_BLOCKS = 2          # equal blocks; total must be divisible; G resumes
 

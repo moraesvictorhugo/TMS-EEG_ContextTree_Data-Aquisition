@@ -7,6 +7,77 @@ from tms_eeg import config
 from tms_eeg.hardware.magicpy_adapter import MagVenture, PairedPulseMagVenture
 
 
+def _serial_frame(payload):
+    checksum = int(mp.MagVenture.calc_crc([f"{byte:02x}" for byte in payload]), 16)
+    return bytes([0xfe, len(payload), *payload, checksum, 0xff])
+
+
+STATUS = _serial_frame([0, 0x34, 1, 2, 3, 24, 72, 16, 0])
+DIDT = bytes.fromhex("fe 04 02 33 19 02 df ff")
+
+
+def _fake_device(device_class, reply):
+    device = object.__new__(device_class)
+    device.flush_before_cmd = True
+    device.flush_input = Mock()
+    device.show_coil_hint = False
+    device.sleep_short = 0
+    device.port = Mock(is_open=True, in_waiting=len(reply))
+
+    def read(size=1):
+        nonlocal reply
+        data, reply = reply[:size], reply[size:]
+        device.port.in_waiting = len(reply)
+        return data
+
+    device.port.read.side_effect = read
+    return device
+
+
+@pytest.mark.parametrize("reply", [DIDT + STATUS, STATUS + DIDT, STATUS])
+def test_intensity_sets_mode_with_a_valid_status_reply(monkeypatch, reply):
+    monkeypatch.setattr(config, "ENABLE_LOGGING", False)
+    monkeypatch.setattr("magicpy.magicpy.time.sleep", Mock())
+    device = _fake_device(MagVenture, reply)
+
+    device.set_mode("Standard", "Normal", 2, 10, baratio=80)
+
+    writes = device.port.write.call_args_list
+    assert len(writes) == 2
+    assert writes[0].args[0][:3] == bytes.fromhex("fe 01 00")
+    assert writes[1].args[0][:5] == bytes.fromhex("fe 0b 09 01 01")
+
+
+@pytest.mark.parametrize("reply", [
+    DIDT,
+    DIDT + STATUS[:-1],
+    DIDT + STATUS + STATUS,
+    DIDT + STATUS[:-2] + bytes([STATUS[-2] ^ 1, 0xff]),
+    _serial_frame([3, 24, 72, 0]) + STATUS,
+])
+def test_intensity_rejects_missing_invalid_or_ambiguous_status(monkeypatch, reply):
+    monkeypatch.setattr("magicpy.magicpy.time.sleep", Mock())
+    device = _fake_device(MagVenture, reply)
+
+    with pytest.raises(ValueError, match="Could not retrieve status"):
+        device.set_mode("Standard", "Normal", 2, 10, baratio=80)
+
+    device.port.write.assert_called_once()
+
+
+@pytest.mark.parametrize("device_class,query", [
+    (MagVenture, "get_status"),
+    (PairedPulseMagVenture, "get_status_set_get"),
+])
+def test_status_recovery_does_not_change_other_queries(monkeypatch, device_class, query):
+    monkeypatch.setattr("magicpy.magicpy.time.sleep", Mock())
+    device = _fake_device(device_class, DIDT + STATUS)
+
+    _, error = getattr(device, query)()
+
+    assert error == 1
+
+
 def test_settings_query_with_real_magicpy_decoder(monkeypatch):
     # Synthetic reply for Dual, Normal, Biphasic, IPI index 250 = 2 ms.
     frame = bytes([0xFE, 0x0B, 0x09, 0, 0, 3, 0, 1, 3, 250, 0, 80, 0, 0xFF])
